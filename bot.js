@@ -12,8 +12,11 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 const {
+  AudioPlayerStatus,
+  StreamType,
   VoiceConnectionStatus,
   createAudioPlayer,
+  createAudioResource,
   entersState,
   joinVoiceChannel,
 } = require('@discordjs/voice');
@@ -49,17 +52,33 @@ function getAudioPath(filename) {
   return fs.existsSync(filePath) ? filePath : null;
 }
 
-function playInDiscord(bot, session, filename) {
+async function playInDiscord(bot, session, filename) {
   const audioPath = getAudioPath(filename);
   if (!audioPath) throw new Error(`Audio file ${filename} was not found.`);
+  if (session.audioProcess) session.audioProcess.kill();
   const ffmpeg = spawn(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-i', audioPath,
     '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1',
   ]);
-  ffmpeg.stderr.on('data', (data) => addLog('error', `Bot ${bot.number} audio: ${data.toString().trim()}`));
+  session.audioProcess = ffmpeg;
+  let ffmpegError = '';
+  ffmpeg.stderr.on('data', (data) => {
+    ffmpegError += data.toString();
+    addLog('error', `Bot ${bot.number} audio: ${data.toString().trim()}`);
+  });
   ffmpeg.on('error', (error) => addLog('error', `Bot ${bot.number} audio process failed: ${error.message}`));
-  const { createAudioResource, StreamType } = require('@discordjs/voice');
   session.player.play(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
+  const started = new Promise((resolve) => {
+    if (session.player.state.status === AudioPlayerStatus.Playing) resolve();
+    else session.player.once(AudioPlayerStatus.Playing, resolve);
+  });
+  const failed = new Promise((_, reject) => session.player.once('error', reject));
+  try {
+    await Promise.race([started, failed, new Promise((_, reject) => setTimeout(() => reject(new Error(`Audio did not start${ffmpegError ? `: ${ffmpegError.trim()}` : '.'}`)), 15_000))]);
+    addLog('info', `Bot ${bot.number} started playing ${filename}.`);
+  } finally {
+    session.audioProcess = null;
+  }
 }
 
 async function connectToMemberChannel(bot, member) {
@@ -176,7 +195,7 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, filen
       if (action === 'stop' && !guildIdToControl && !requestedChannel) {
         const completed = [...sessions.entries()]
           .filter(([key]) => key.startsWith(`${bot.number}:`))
-          .map(([, session]) => { session.player.stop(); return true; }).length > 0;
+          .map(([, session]) => { session.player.stop(); if (session.audioProcess) session.audioProcess.kill(); return true; }).length > 0;
         return { bot: bot.number, completed };
       }
       if (!guild) throw new Error(`Cannot access channel ${channelIdToControl}. Invite Bot ${bot.number} to the channel's server.`);
@@ -184,11 +203,12 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, filen
       const session = sessions.get(`${bot.number}:${guild.id}`);
       if (action === 'stop') {
         session?.player.stop();
+        if (session?.audioProcess) session.audioProcess.kill();
         return { bot: bot.number, completed: Boolean(session) };
       }
       const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
       const connected = await connectToChannel(bot, guild, channel);
-      if (action === 'play') playInDiscord(bot, connected, filename);
+      if (action === 'play') await playInDiscord(bot, connected, filename);
       return { bot: bot.number, completed: true, state: sessions.get(`${bot.number}:${guild.id}`)?.connection.state.status };
     } catch (error) {
       return { bot: bot.number, completed: false, error: error.message };
@@ -212,6 +232,7 @@ function disconnect(botNumber, guildIdToDisconnect) {
   if (!session) return false;
   sessions.delete(key);
   session.player.stop();
+  if (session.audioProcess) session.audioProcess.kill();
   safelyDestroy(session.connection);
   return true;
 }
