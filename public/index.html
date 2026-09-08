@@ -42,7 +42,7 @@
       <p class="muted">Select a server and voice channel. Every online bot will receive the same action.</p>
       <div class="controls">
         <div><label for="guild">Discord server</label><select id="guild"><option value="">Loading servers...</option></select></div>
-        <div><label for="channel">Voice channel</label><select id="channel"><option value="">Choose a server first</option></select></div>
+        <div><label for="channel">Voice channel</label><select id="channel"><option value="">Choose a server first</option></select><input id="channelId" inputmode="numeric" placeholder="Or paste voice channel ID" style="margin-top:8px"></div>
         <div><label for="playSlot">Audio slot</label><select id="playSlot"><option value="j1">!j1</option><option value="j2">!j2</option><option value="j3">!j3</option><option value="j4">!j4</option><option value="j5">!j5</option></select></div>
       </div>
       <div class="actions">
@@ -75,6 +75,7 @@
     const controlStatus = document.querySelector('#controlStatus');
     const guildSelect = document.querySelector('#guild');
     const channelSelect = document.querySelector('#channel');
+    const channelIdInput = document.querySelector('#channelId');
     const playSlot = document.querySelector('#playSlot');
     let guilds = [];
     const slots = document.querySelector('#slots');
@@ -93,7 +94,8 @@
     document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
       const action = button.dataset.action;
       controlStatus.textContent = 'Sending command...';
-      const response = await fetch('/api/control', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, guildId: guildSelect.value, channelId: channelSelect.value, slot: playSlot.value }) });
+      const channelId = channelIdInput.value.trim() || channelSelect.value;
+      const response = await fetch('/api/control', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, guildId: guildSelect.value, channelId, slot: playSlot.value }) });
       const result = await response.json();
       controlStatus.textContent = response.ok ? `${result.completed}/${result.total} bots completed ${action}.` : result.error;
     }));

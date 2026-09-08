@@ -110,7 +110,8 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, slot)
   const activeBots = bots.filter((bot) => bot.status === 'online');
   if (!activeBots.length) throw new Error('No bots are online yet.');
   const results = await Promise.allSettled(activeBots.map(async (bot) => {
-    const guild = bot.client.guilds.cache.get(guildIdToControl);
+    const requestedChannel = channelIdToControl && bot.client.channels.cache.get(channelIdToControl);
+    const guild = (requestedChannel?.guild) || bot.client.guilds.cache.get(guildIdToControl);
     if (!guild) throw new Error(`Bot ${bot.number} is not in that server.`);
 
     if (action === 'disconnect') return disconnect(bot.number, guild.id);
@@ -120,7 +121,7 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, slot)
       return Boolean(session);
     }
 
-    const channel = guild.channels.cache.get(channelIdToControl);
+    const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
     if (!channel?.isVoiceBased()) throw new Error(`Voice channel was not found for bot ${bot.number}.`);
     const connected = await connectToChannel(bot, guild, channel);
     if (action === 'play') playAudio(bot, guild.id, connected, slot);
@@ -250,11 +251,14 @@ app.get('/api/discord-context', requireAdmin, (request, response) => {
 });
 app.post('/api/control', requireAdmin, async (request, response) => {
   const { action, guildId: targetGuildId, channelId: targetChannelId, slot } = request.body || {};
-  if (!['join', 'stop', 'disconnect', 'play'].includes(action) || !/^\d{17,20}$/.test(targetGuildId || '')) {
+  if (!['join', 'stop', 'disconnect', 'play'].includes(action)) {
     return response.status(400).json({ error: 'Choose a valid server and action.' });
   }
   if (['join', 'play'].includes(action) && !/^\d{17,20}$/.test(targetChannelId || '')) {
     return response.status(400).json({ error: 'Choose a voice channel.' });
+  }
+  if (['stop', 'disconnect'].includes(action) && !/^\d{17,20}$/.test(targetGuildId || '')) {
+    return response.status(400).json({ error: 'Choose a server for this action.' });
   }
   if (action === 'play' && !audioSlots.includes(slot)) return response.status(400).json({ error: 'Choose an audio slot.' });
   try {

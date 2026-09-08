@@ -41,7 +41,7 @@ When `GUILD_ID` is set, slash commands are registered in that server and appear 
 
 Create a **Web Service** from this repository. Set **Root Directory** to blank (the repository root), **Build Command** to `npm install`, and **Start Command** to `npm start`. Do not use `node src/index.js` as the Render start command. Do not set the root directory to `src`; `src` is a folder containing the implementation, not the project root. Add all five `DISCORD_TOKEN_1` through `DISCORD_TOKEN_5`, matching client IDs, and `WEB_ADMIN_KEY` as Render environment variables. Add `GUILD_ID` only when it is the real numeric ID of your Discord server; otherwise leave it empty.
 
-The dashboard is available at the deployed service URL. Open it with `?key=YOUR_WEB_ADMIN_KEY`, choose a server and voice channel, then use **Join**, **Stop**, **Disconnect**, or **Play selected**. The same action is broadcast to every online bot.
+The dashboard is available at the deployed service URL. Open it with `?key=YOUR_WEB_ADMIN_KEY`, paste a Discord voice channel ID into the **Voice channel** field, then use **Join**. Every online bot will join that channel. You can also use **Play selected**, **Stop**, or **Disconnect**. The same action is broadcast to every online bot. The bot accounts must already be invited to the channel's server and have `Connect` and `Speak` permissions.
 
 The included `render.yaml` contains the same worker configuration for Blueprint deploys.
 
