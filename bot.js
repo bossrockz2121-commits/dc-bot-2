@@ -47,10 +47,13 @@ async function connectToMemberChannel(bot, member) {
 }
 
 async function connectToChannel(bot, guild, channel) {
+  if (!channel.isVoiceBased()) throw new Error(`Channel ${channel.id} is not a voice channel.`);
   const botMember = guild.members.me || await guild.members.fetchMe();
   const permission = channel.permissionsFor(botMember);
-  if (!permission?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
-    throw new Error('I need Connect and Speak permissions in that voice channel.');
+  const missingPermissions = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]
+    .filter((permissionFlag) => !permission?.has(permissionFlag));
+  if (missingPermissions.length) {
+    throw new Error(`Missing permissions: ${missingPermissions.join(', ')}.`);
   }
 
   const key = `${bot.number}:${guild.id}`;
@@ -103,43 +106,45 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
     const details = bots.map((bot) => `Bot ${bot.number}: ${bot.statusMessage || bot.status}`).join(' | ');
     throw new Error(`No bots are online. ${details || 'Add DISCORD_TOKEN_1 through DISCORD_TOKEN_5 in Render.'}`);
   }
-  const results = await Promise.allSettled(activeBots.map(async (bot) => {
-    const requestedChannel = channelIdToControl
-      ? await bot.client.channels.fetch(channelIdToControl).catch(() => null)
-      : null;
-    const guild = (requestedChannel?.guild) || bot.client.guilds.cache.get(guildIdToControl);
-    if (action === 'disconnect' && !guildIdToControl && !requestedChannel) {
-      const disconnected = [...sessions.keys()]
-        .filter((key) => key.startsWith(`${bot.number}:`))
-        .map((key) => disconnect(bot.number, key.split(':')[1]))
-        .some(Boolean);
-      return disconnected;
+  const results = await Promise.all(activeBots.map(async (bot) => {
+    try {
+      const requestedChannel = channelIdToControl
+        ? await bot.client.channels.fetch(channelIdToControl).catch(() => null)
+        : null;
+      const guild = (requestedChannel?.guild) || bot.client.guilds.cache.get(guildIdToControl);
+      if (action === 'disconnect' && !guildIdToControl && !requestedChannel) {
+        const completed = [...sessions.keys()]
+          .filter((key) => key.startsWith(`${bot.number}:`))
+          .map((key) => disconnect(bot.number, key.split(':')[1]))
+          .some(Boolean);
+        return { bot: bot.number, completed };
+      }
+      if (action === 'stop' && !guildIdToControl && !requestedChannel) {
+        const completed = [...sessions.entries()]
+          .filter(([key]) => key.startsWith(`${bot.number}:`))
+          .map(([, session]) => { session.player.stop(); return true; }).length > 0;
+        return { bot: bot.number, completed };
+      }
+      if (!guild) throw new Error(`Cannot access channel ${channelIdToControl}. Invite Bot ${bot.number} to the channel's server.`);
+      if (action === 'disconnect') return { bot: bot.number, completed: disconnect(bot.number, guild.id) };
+      const session = sessions.get(`${bot.number}:${guild.id}`);
+      if (action === 'stop') {
+        session?.player.stop();
+        return { bot: bot.number, completed: Boolean(session) };
+      }
+      const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
+      await connectToChannel(bot, guild, channel);
+      return { bot: bot.number, completed: true };
+    } catch (error) {
+      return { bot: bot.number, completed: false, error: error.message };
     }
-    if (action === 'stop' && !guildIdToControl && !requestedChannel) {
-      const stopped = [...sessions.entries()]
-        .filter(([key]) => key.startsWith(`${bot.number}:`))
-        .map(([, session]) => { session.player.stop(); return true; });
-      return stopped.length > 0;
-    }
-    if (!guild) throw new Error(`Bot ${bot.number} cannot access channel ${channelIdToControl}. Check the channel ID and invite this bot to its server.`);
-
-    if (action === 'disconnect') return disconnect(bot.number, guild.id);
-    const session = sessions.get(`${bot.number}:${guild.id}`);
-    if (action === 'stop') {
-      session?.player.stop();
-      return Boolean(session);
-    }
-
-    const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
-    if (!channel?.isVoiceBased()) throw new Error(`Voice channel was not found for bot ${bot.number}.`);
-    await connectToChannel(bot, guild, channel);
-    return true;
   }));
-  const failed = results.filter((result) => result.status === 'rejected');
+  const failed = results.filter((result) => result.error);
   const summary = {
-    completed: results.length - failed.length,
+    completed: results.filter((result) => result.completed).length,
     total: results.length,
-    errors: failed.map((result) => result.reason?.message || 'Command failed'),
+    errors: failed.map((result) => `Bot ${result.bot}: ${result.error}`),
+    results,
   };
   const detail = summary.errors.length ? ` Errors: ${summary.errors.join(' | ')}` : '';
   addLog(failed.length ? 'error' : 'info', `Web control ${action}: ${summary.completed}/${summary.total} bots completed.${detail}`);
