@@ -106,7 +106,7 @@ async function connectToMemberChannel(bot, member) {
   return connectToChannel(bot, member.guild, member.voice.channel);
 }
 
-async function connectToChannel(bot, guild, channel) {
+async function connectToChannel(bot, guild, channel, allowRetry = true) {
   if (!channel.isVoiceBased()) throw new Error(`Channel ${channel.id} is not a voice channel.`);
   const botMember = guild.members.me || await guild.members.fetchMe();
   const permission = channel.permissionsFor(botMember);
@@ -152,19 +152,21 @@ async function connectToChannel(bot, guild, channel) {
     return session;
   } catch (error) {
     addLog('error', `Bot ${bot.number} voice handshake failed in state ${connection.state.status}: ${error.message}. Retrying once.`);
-    try {
-      connection.rejoin({ channelId: channel.id, selfDeaf: false, selfMute: false });
-      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-      await confirmVoicePresence(bot, guild, channel.id);
-      addLog('info', `Bot ${bot.number} voice reconnect confirmed in channel ${channel.id}.`);
-      return session;
-    } catch (retryError) {
-      addLog('error', `Bot ${bot.number} voice retry failed in state ${connection.state.status}: ${retryError.message}.`);
     safelyDestroy(connection);
     sessions.delete(key);
-      throw new Error(retryError.code === 'ABORT_ERR'
-        ? 'Discord voice UDP handshake timed out. Check Connect/Speak permissions and use a Render Background Worker; Web Services may not support the voice connection reliably.'
-        : retryError.message);
+    if (!allowRetry) {
+      throw new Error(error.code === 'ABORT_ERR'
+        ? 'Discord voice UDP handshake timed out after a fresh connection. Check Render outbound UDP support and the bot voice permissions.'
+        : error.message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    try {
+      const retrySession = await connectToChannel(bot, guild, channel, false);
+      addLog('info', `Bot ${bot.number} fresh voice reconnect confirmed in channel ${channel.id}.`);
+      return retrySession;
+    } catch (retryError) {
+      addLog('error', `Bot ${bot.number} fresh voice retry failed: ${retryError.message}.`);
+      throw retryError;
     }
   }
 }
