@@ -156,8 +156,10 @@ async function runForAllBots(command, message) {
 function attachBot(bot) {
   if (!bot.token || bot.token.startsWith('replace-with-')) {
     bots.push({ ...bot, client: null, status: 'missing-token', statusMessage: 'Add this bot token in Render.' });
+    console.error(`[Bot ${bot.number}] NOT STARTED: DISCORD_TOKEN_${bot.number} is missing in Render.`);
     return;
   }
+  console.log(`[Bot ${bot.number}] Token configured. Attempting Discord login...`);
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
   const botState = { ...bot, client, status: bot.status };
   bots.push(botState);
@@ -166,7 +168,7 @@ function attachBot(bot) {
     botState.status = 'online';
     botState.statusMessage = 'Connected to Discord';
     botState.tag = readyClient.user.tag;
-    console.log(`Bot ${bot.number} logged in as ${readyClient.user.tag}`);
+    console.log(`[Bot ${bot.number}] LOGIN SUCCESS: ${readyClient.user.tag} | Servers: ${readyClient.guilds.cache.size}`);
   });
 
   client.on('messageCreate', async (message) => {
@@ -187,7 +189,7 @@ function attachBot(bot) {
   client.login(bot.token).catch((error) => {
     botState.status = 'error';
     botState.statusMessage = error.code === 4004 ? 'Invalid token' : error.message;
-    console.error(`Bot ${bot.number} failed to start:`, error.message);
+    console.error(`[Bot ${bot.number}] LOGIN FAILED: ${botState.statusMessage}`);
   });
 }
 
@@ -232,5 +234,7 @@ app.post('/api/control', requireAdmin, async (request, response) => {
 app.listen(port, '0.0.0.0', () => console.log(`Web dashboard listening on port ${port}`));
 
 const configured = configuredBots();
-if (!configured.length) console.warn('No bot tokens configured. Add DISCORD_TOKEN_1 through DISCORD_TOKEN_5 in Render.');
+const tokenCount = configured.filter((bot) => bot.token && !bot.token.startsWith('replace-with-')).length;
+console.log(`Configured ${tokenCount}/5 Discord bot token(s).`);
+if (!tokenCount) console.error('No Discord bot tokens configured. Add DISCORD_TOKEN_1 through DISCORD_TOKEN_5 in Render.');
 configured.forEach(attachBot);
