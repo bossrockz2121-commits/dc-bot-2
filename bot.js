@@ -199,9 +199,9 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, filen
   }
   const results = await Promise.all(activeBots.map(async (bot) => {
     try {
-      if (action === 'join') {
+      if (action === 'join' || action === 'play') {
         // Give Discord a moment between gateway voice-state handshakes.
-        await new Promise((resolve) => setTimeout(resolve, (bot.number - 1) * 500));
+        await new Promise((resolve) => setTimeout(resolve, (bot.number - 1) * 1_000));
       }
       const requestedChannel = channelIdToControl
         ? await bot.client.channels.fetch(channelIdToControl).catch(() => null)
