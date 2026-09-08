@@ -29,11 +29,9 @@
   <main>
     <header><div class="eyebrow">Synchronized voice control</div><h1>Move the whole fleet.</h1><p class="muted">Start, stop, or disconnect every online bot from one place.</p></header>
     <section class="panel">
-      <div class="grid">
-        <div><label for="guild">Server</label><select id="guild"><option value="">Loading servers...</option></select></div>
-        <div><label for="channel">Voice channel</label><select id="channel"><option value="">Choose a server first</option></select><input id="channelId" inputmode="numeric" placeholder="Or paste channel ID"></div>
-      </div>
-      <div class="actions"><button data-action="join">Start / Join</button><button data-action="stop">Stop</button><button data-action="disconnect" class="danger">Disconnect</button></div>
+      <label for="channelId">Discord voice channel ID</label>
+      <input id="channelId" inputmode="numeric" placeholder="Paste the voice channel ID here">
+      <div class="actions"><button data-action="join">Join All Bots</button><button data-action="stop">Stop All</button><button data-action="disconnect" class="danger">Disconnect All</button></div>
       <p id="status" class="status"></p>
     </section>
   </main>
@@ -41,32 +39,16 @@
     const key = new URLSearchParams(location.search).get('key') || localStorage.getItem('dashboardKey') || '';
     if (key) localStorage.setItem('dashboardKey', key);
     const headers = { 'x-admin-key': key };
-    const guildSelect = document.querySelector('#guild');
-    const channelSelect = document.querySelector('#channel');
     const channelIdInput = document.querySelector('#channelId');
     const status = document.querySelector('#status');
-    let guilds = [];
-    function updateChannels() {
-      const guild = guilds.find(item => item.id === guildSelect.value);
-      channelSelect.innerHTML = guild?.channels.length ? guild.channels.map(channel => `<option value="${channel.id}">${channel.name}</option>`).join('') : '<option value="">No voice channels</option>';
-    }
-    async function loadContext() {
-      const response = await fetch('/api/discord-context', { headers });
-      if (!response.ok) throw new Error('Dashboard key is missing or invalid.');
-      guilds = (await response.json()).guilds;
-      guildSelect.innerHTML = guilds.length ? guilds.map(guild => `<option value="${guild.id}">${guild.name}</option>`).join('') : '<option value="">No online bot servers</option>';
-      updateChannels();
-    }
-    guildSelect.addEventListener('change', updateChannels);
     document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
       const action = button.dataset.action;
-      const channelId = channelIdInput.value.trim() || channelSelect.value;
+      const channelId = channelIdInput.value.trim();
       status.textContent = 'Sending command to all online bots...';
-      const response = await fetch('/api/control', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, guildId: guildSelect.value, channelId }) });
+      const response = await fetch('/api/control', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, channelId }) });
       const result = await response.json();
       status.textContent = response.ok ? `${result.completed}/${result.total} bots completed ${action}.` : result.error;
     }));
-    loadContext().catch(error => status.textContent = error.message);
   </script>
 </body>
 </html>

@@ -74,6 +74,19 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
   const results = await Promise.allSettled(activeBots.map(async (bot) => {
     const requestedChannel = channelIdToControl && bot.client.channels.cache.get(channelIdToControl);
     const guild = (requestedChannel?.guild) || bot.client.guilds.cache.get(guildIdToControl);
+    if (action === 'disconnect' && !guildIdToControl && !requestedChannel) {
+      const disconnected = [...sessions.keys()]
+        .filter((key) => key.startsWith(`${bot.number}:`))
+        .map((key) => disconnect(bot.number, key.split(':')[1]))
+        .some(Boolean);
+      return disconnected;
+    }
+    if (action === 'stop' && !guildIdToControl && !requestedChannel) {
+      const stopped = [...sessions.entries()]
+        .filter(([key]) => key.startsWith(`${bot.number}:`))
+        .map(([, session]) => { session.player.stop(); return true; });
+      return stopped.length > 0;
+    }
     if (!guild) throw new Error(`Bot ${bot.number} is not in that server.`);
 
     if (action === 'disconnect') return disconnect(bot.number, guild.id);
@@ -197,9 +210,6 @@ app.post('/api/control', requireAdmin, async (request, response) => {
   }
   if (action === 'join' && !/^\d{17,20}$/.test(targetChannelId || '')) {
     return response.status(400).json({ error: 'Choose a voice channel.' });
-  }
-  if (['stop', 'disconnect'].includes(action) && !/^\d{17,20}$/.test(targetGuildId || '')) {
-    return response.status(400).json({ error: 'Choose a server for this action.' });
   }
   try {
     response.json(await runWebControl(action, targetGuildId, targetChannelId));

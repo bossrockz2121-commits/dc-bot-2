@@ -38,7 +38,7 @@ In the Developer Portal, enable the **Message Content Intent** under **Bot → P
 
 Create a **Web Service** from this repository. Set **Root Directory** to blank (the repository root), **Build Command** to `npm install`, and **Start Command** to `npm start`. Do not use `node src/index.js` as the Render start command. Do not set the root directory to `src`; `src` is a folder containing the implementation, not the project root. Add all five `DISCORD_TOKEN_1` through `DISCORD_TOKEN_5`, matching client IDs, and `WEB_ADMIN_KEY` as Render environment variables. Add `GUILD_ID` only when it is the real numeric ID of your Discord server; otherwise leave it empty.
 
-The dashboard is available at the deployed service URL. Open it with `?key=YOUR_WEB_ADMIN_KEY`, paste a Discord voice channel ID into the **Voice channel** field, then use **Start / Join**. Every online bot will join that channel. Use **Stop** or **Disconnect** to control all bots. The bot accounts must already be invited to the channel's server and have `Connect` and `Speak` permissions.
+The dashboard is available at the deployed service URL. Open it with `?key=YOUR_WEB_ADMIN_KEY`, paste a Discord voice channel ID, and click **Join All Bots**. Every online bot will join that channel. **Stop All** and **Disconnect All** control every active voice session. The bot accounts must already be invited to the channel's server and have `Connect` and `Speak` permissions.
 
 The included `render.yaml` contains the same Web Service configuration for Blueprint deploys.
 
