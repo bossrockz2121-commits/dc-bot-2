@@ -38,6 +38,12 @@ In the Developer Portal, enable the **Message Content Intent** under **Bot → P
 
 When `GUILD_ID` is set, slash commands are registered in that server and appear quickly. Without it, commands are registered globally and can take up to an hour to appear.
 
+## Deploy on Render
+
+Create a **Background Worker** from this repository. Set **Root Directory** to blank (the repository root), **Build Command** to `npm install`, and **Start Command** to `npm start`. Do not set the root directory to `src`; `src` is a folder containing the entrypoint, not the project root. Add `DISCORD_TOKEN`, `CLIENT_ID`, and optionally `GUILD_ID` as Render environment variables.
+
+The included `render.yaml` contains the same worker configuration for Blueprint deploys.
+
 ## Invite the bot
 
 In the Developer Portal, create an OAuth2 invite URL with these scopes:
