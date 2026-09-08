@@ -85,6 +85,8 @@ async function connectToChannel(bot, guild, channel) {
 
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+    await confirmVoicePresence(bot, guild, channel.id);
+    addLog('info', `Bot ${bot.number} confirmed in voice channel ${channel.id}.`);
     return session;
   } catch (error) {
     addLog('error', `Bot ${bot.number} voice handshake failed in state ${connection.state.status}: ${error.message}. Retrying once.`);
@@ -102,6 +104,15 @@ async function connectToChannel(bot, guild, channel) {
         : retryError.message);
     }
   }
+}
+
+async function confirmVoicePresence(bot, guild, channelId) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const member = await guild.members.fetch(bot.client.user.id).catch(() => null);
+    if (member?.voice?.channelId === channelId) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`Discord did not confirm Bot ${bot.number} in voice channel ${channelId}. Check the bot's server membership and channel permissions.`);
 }
 
 function safelyDestroy(connection) {
