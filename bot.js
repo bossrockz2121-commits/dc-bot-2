@@ -65,13 +65,17 @@ async function connectToChannel(bot, guild, channel) {
     channelId: channel.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: false,
+    selfMute: false,
   });
   const player = createAudioPlayer();
   connection.subscribe(player);
   connection.on('error', (error) => console.error(`Bot ${bot.number} voice error:`, error));
+  connection.on('debug', (message) => addLog('info', `Bot ${bot.number} voice debug: ${message}`));
   const session = { channelId: channel.id, connection, player };
   sessions.set(key, session);
   connection.on('stateChange', (oldState, newState) => {
+    addLog('info', `Bot ${bot.number} voice state: ${oldState.status} -> ${newState.status}.`);
     if (newState.status === VoiceConnectionStatus.Destroyed && sessions.get(key) === session) {
       sessions.delete(key);
       addLog('info', `Bot ${bot.number} voice session ended.`);
@@ -83,11 +87,20 @@ async function connectToChannel(bot, guild, channel) {
     await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
     return session;
   } catch (error) {
+    addLog('error', `Bot ${bot.number} voice handshake failed in state ${connection.state.status}: ${error.message}. Retrying once.`);
+    try {
+      connection.rejoin({ channelId: channel.id, selfDeaf: false, selfMute: false });
+      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      addLog('info', `Bot ${bot.number} voice reconnect succeeded.`);
+      return session;
+    } catch (retryError) {
+      addLog('error', `Bot ${bot.number} voice retry failed in state ${connection.state.status}: ${retryError.message}.`);
     safelyDestroy(connection);
     sessions.delete(key);
-    throw new Error(error.code === 'ABORT_ERR'
-      ? 'Voice connection timed out. Check Connect and Speak permissions.'
-      : error.message);
+      throw new Error(retryError.code === 'ABORT_ERR'
+        ? 'Discord voice UDP handshake timed out. Check Connect/Speak permissions and use a Render Background Worker; Web Services may not support the voice connection reliably.'
+        : retryError.message);
+    }
   }
 }
 
