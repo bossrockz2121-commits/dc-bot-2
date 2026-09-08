@@ -121,6 +121,10 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
   }
   const results = await Promise.all(activeBots.map(async (bot) => {
     try {
+      if (action === 'join') {
+        // Give Discord a moment between gateway voice-state handshakes.
+        await new Promise((resolve) => setTimeout(resolve, (bot.number - 1) * 500));
+      }
       const requestedChannel = channelIdToControl
         ? await bot.client.channels.fetch(channelIdToControl).catch(() => null)
         : null;
@@ -147,7 +151,7 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
       }
       const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
       await connectToChannel(bot, guild, channel);
-      return { bot: bot.number, completed: true };
+      return { bot: bot.number, completed: true, state: sessions.get(`${bot.number}:${guild.id}`)?.connection.state.status };
     } catch (error) {
       return { bot: bot.number, completed: false, error: error.message };
     }
