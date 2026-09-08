@@ -13,7 +13,7 @@
     h1 { margin: 12px 0 0; font-size: clamp(2.8rem, 8vw, 5.7rem); font-weight: 400; line-height: .9; }
     .panel { margin-top: 28px; padding: 26px; border: 1px solid #5d4d3d; background: #1b1713dd; }
     .muted { color: #c9b9a6; font: .95rem/1.5 Arial, sans-serif; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid { display: grid; grid-template-columns: 1fr 180px; gap: 14px; }
     label { display: block; margin: 0 0 7px; color: #c9b9a6; font: 700 .76rem Arial, sans-serif; text-transform: uppercase; letter-spacing: .08em; }
     input, select, button { width: 100%; box-sizing: border-box; padding: 13px; border: 1px solid #80684e; background: #12100d; color: #f5eee5; font: inherit; }
     input { margin-top: 9px; }
@@ -29,6 +29,12 @@
   <main>
     <header><div class="eyebrow">Synchronized voice control</div><h1>Move the whole fleet.</h1><p class="muted">Start, stop, or disconnect every online bot from one place.</p></header>
     <section class="panel">
+      <label for="adminKey">Dashboard key</label>
+      <input id="adminKey" type="password" autocomplete="current-password" placeholder="Paste WEB_ADMIN_KEY from Render">
+      <button id="saveKey" type="button" style="margin-top:10px">Save key</button>
+      <p id="authStatus" class="status"></p>
+    </section>
+    <section class="panel">
       <label for="channelId">Discord voice channel ID</label>
       <input id="channelId" inputmode="numeric" placeholder="Paste the voice channel ID here">
       <div class="actions"><button data-action="join">Join All Bots</button><button data-action="stop">Stop All</button><button data-action="disconnect" class="danger">Disconnect All</button></div>
@@ -36,16 +42,25 @@
     </section>
   </main>
   <script>
-    const key = new URLSearchParams(location.search).get('key') || localStorage.getItem('dashboardKey') || '';
-    if (key) localStorage.setItem('dashboardKey', key);
-    const headers = { 'x-admin-key': key };
+    let key = new URLSearchParams(location.search).get('key') || localStorage.getItem('dashboardKey') || '';
+    const keyInput = document.querySelector('#adminKey');
+    const authStatus = document.querySelector('#authStatus');
+    keyInput.value = key;
+    if (new URLSearchParams(location.search).has('key')) history.replaceState({}, '', location.pathname);
+    const headers = () => ({ 'x-admin-key': key });
+    document.querySelector('#saveKey').addEventListener('click', () => {
+      key = keyInput.value.trim();
+      localStorage.setItem('dashboardKey', key);
+      authStatus.textContent = key ? 'Key saved in this browser.' : 'Enter the WEB_ADMIN_KEY from Render.';
+    });
     const channelIdInput = document.querySelector('#channelId');
     const status = document.querySelector('#status');
     document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
       const action = button.dataset.action;
       const channelId = channelIdInput.value.trim();
+      if (!key) { status.textContent = 'Enter and save the dashboard key first.'; return; }
       status.textContent = 'Sending command to all online bots...';
-      const response = await fetch('/api/control', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, channelId }) });
+      const response = await fetch('/api/control', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ action, channelId }) });
       const result = await response.json();
       status.textContent = response.ok ? `${result.completed}/${result.total} bots completed ${action}.` : result.error;
     }));

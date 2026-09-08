@@ -182,7 +182,8 @@ function attachBot(bot) {
 }
 
 function requireAdmin(request, response, next) {
-  if (!adminKey || request.get('x-admin-key') !== adminKey) return response.status(401).json({ error: 'Invalid dashboard key.' });
+  if (!adminKey) return response.status(503).json({ error: 'WEB_ADMIN_KEY is not configured in Render.' });
+  if (request.get('x-admin-key') !== adminKey) return response.status(401).json({ error: 'Invalid dashboard key. Enter the exact WEB_ADMIN_KEY from Render.' });
   next();
 }
 
