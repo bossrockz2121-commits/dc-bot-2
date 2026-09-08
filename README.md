@@ -31,6 +31,8 @@ The user and bot must be in the same server. Use these commands in a text channe
 | `!j1` through `!j5` | Join and play the assigned audio slot |
 | `!s` | Stop the current audio |
 
+Each command is handled once and broadcast concurrently to every online bot. One reply reports how many bots completed the action.
+
 In the Developer Portal, enable the **Message Content Intent** under **Bot → Privileged Gateway Intents**. The bot also needs the `View Channel`, `Connect`, and `Speak` permissions in the voice channel.
 
 When `GUILD_ID` is set, slash commands are registered in that server and appear quickly. Without it, commands are registered globally and can take up to an hour to appear.

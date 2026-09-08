@@ -121,6 +121,42 @@ function disconnect(botNumber, guildIdToDisconnect) {
   return true;
 }
 
+async function runForAllBots(command, message) {
+  const activeBots = bots.filter((bot) => bot.status === 'online');
+  if (!activeBots.length) throw new Error('No bots are online yet.');
+
+  const results = await Promise.allSettled(activeBots.map(async (bot) => {
+    if (command === '!j') {
+      await connectToMemberChannel(bot, message.member);
+      return `Bot ${bot.number} joined`;
+    }
+
+    if (command === '!d') {
+      return disconnect(bot.number, message.guild.id) ? `Bot ${bot.number} disconnected` : `Bot ${bot.number} was not connected`;
+    }
+
+    if (command === '!s') {
+      const session = sessions.get(`${bot.number}:${message.guild.id}`);
+      session?.player.stop();
+      return session ? `Bot ${bot.number} stopped` : `Bot ${bot.number} was not playing`;
+    }
+
+    if (/^!j[1-5]$/.test(command)) {
+      const session = await connectToMemberChannel(bot, message.member);
+      playAudio(bot, message.guild.id, session, command.slice(1));
+      return `Bot ${bot.number} playing ${command}`;
+    }
+
+    return null;
+  }));
+
+  const failed = results.filter((result) => result.status === 'rejected');
+  if (failed.length) {
+    console.error('Some bot commands failed:', failed.map((result) => result.reason));
+  }
+  return `${results.length - failed.length}/${results.length} bots completed ${command}.${failed.length ? ` ${failed.length} failed; check bot permissions.` : ''}`;
+}
+
 function attachBot(bot) {
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
   const botState = { ...bot, client, status: 'starting' };
@@ -135,20 +171,11 @@ function attachBot(bot) {
   client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild || !message.content.startsWith('!')) return;
     const command = message.content.trim().toLowerCase();
+    const controller = bots.find((candidate) => candidate.status === 'online');
+    if (controller && botState.number !== controller.number) return;
     try {
-      if (command === '!j') {
-        await connectToMemberChannel(botState, message.member);
-        await message.reply(`Bot ${bot.number} joined your voice channel.`);
-      } else if (command === '!d') {
-        await message.reply(disconnect(bot.number, message.guild.id) ? 'Disconnected.' : 'I am not in a voice channel.');
-      } else if (command === '!s') {
-        const session = sessions.get(`${bot.number}:${message.guild.id}`);
-        session?.player.stop();
-        await message.reply(session ? 'Stopped.' : 'I am not playing audio.');
-      } else if (/^!j[1-5]$/.test(command)) {
-        const session = await connectToMemberChannel(botState, message.member);
-        playAudio(botState, message.guild.id, session, command.slice(1));
-        await message.reply(`Playing ${command}.`);
+      if (['!j', '!s', '!d'].includes(command) || /^!j[1-5]$/.test(command)) {
+        await message.reply(await runForAllBots(command, message));
       }
     } catch (error) {
       console.error(`Bot ${bot.number} command failed:`, error);
