@@ -208,13 +208,47 @@ async function connectToChannel(bot, guild, channel, attempt = 0) {
 }
 
 async function confirmVoicePresence(bot, guild, channelId) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const cachedVoiceState = guild.voiceStates.cache.get(bot.client.user.id);
-    if (cachedVoiceState?.channelId === channelId) return;
-    const member = await guild.members.fetch(bot.client.user.id).catch(() => null);
-    if (member?.voice?.channelId === channelId) return;
+  const userId = bot.client.user.id;
+  const confirmed = () => {
+    const cachedVoiceState = guild.voiceStates.cache.get(userId);
+    return cachedVoiceState?.channelId === channelId;
+  };
+
+  if (confirmed()) return;
+
+  let stopListening;
+  const stateEvent = new Promise((resolve) => {
+    const onVoiceState = (oldState, newState) => {
+      if (newState.id === userId && newState.guild.id === guild.id && newState.channelId === channelId) {
+        stopListening();
+        resolve();
+      }
+    };
+    const timer = setTimeout(() => {
+      stopListening();
+      resolve();
+    }, 30_000);
+    stopListening = () => {
+      clearTimeout(timer);
+      bot.client.removeListener('voiceStateUpdate', onVoiceState);
+    };
+    bot.client.on('voiceStateUpdate', onVoiceState);
+  });
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (confirmed()) {
+      stopListening();
+      return;
+    }
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (member?.voice?.channelId === channelId) {
+      stopListening();
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
+  await stateEvent;
+  if (confirmed()) return;
   throw new Error(`Discord did not confirm Bot ${bot.number} in voice channel ${channelId}. Check the bot's server membership and channel permissions.`);
 }
 
