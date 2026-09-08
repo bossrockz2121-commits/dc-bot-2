@@ -44,7 +44,39 @@ function configuredBots() {
 }
 
 const sessions = new Map();
+const desiredChannels = new Map();
+const reconnectTimers = new Map();
 const bots = [];
+
+function desiredKey(botNumber, guildId) {
+  return `${botNumber}:${guildId}`;
+}
+
+function scheduleKeepAlive(bot, guild, channelId) {
+  const key = desiredKey(bot.number, guild.id);
+  if (reconnectTimers.has(key) || !desiredChannels.has(key)) return;
+  const timer = setTimeout(async () => {
+    reconnectTimers.delete(key);
+    if (!desiredChannels.has(key) || bot.status !== 'online') return;
+    try {
+      const channel = await bot.client.channels.fetch(channelId);
+      await connectToChannel(bot, guild, channel);
+      addLog('info', `Bot ${bot.number} keep-alive reconnected to ${channelId}.`);
+    } catch (error) {
+      addLog('error', `Bot ${bot.number} keep-alive reconnect failed: ${error.message}.`);
+      scheduleKeepAlive(bot, guild, channelId);
+    }
+  }, 5_000);
+  reconnectTimers.set(key, timer);
+}
+
+function clearDesiredChannel(botNumber, guildId) {
+  const key = desiredKey(botNumber, guildId);
+  desiredChannels.delete(key);
+  const timer = reconnectTimers.get(key);
+  if (timer) clearTimeout(timer);
+  reconnectTimers.delete(key);
+}
 
 function getAudioPath(filename) {
   if (!filename || path.basename(filename) !== filename) return null;
@@ -108,6 +140,7 @@ async function connectToMemberChannel(bot, member) {
 
 async function connectToChannel(bot, guild, channel, attempt = 0) {
   if (!channel.isVoiceBased()) throw new Error(`Channel ${channel.id} is not a voice channel.`);
+  desiredChannels.set(desiredKey(bot.number, guild.id), { channelId: channel.id });
   const botMember = guild.members.me || await guild.members.fetchMe();
   const permission = channel.permissionsFor(botMember);
   const missingPermissions = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]
@@ -141,6 +174,8 @@ async function connectToChannel(bot, guild, channel, attempt = 0) {
     if (newState.status === VoiceConnectionStatus.Destroyed && sessions.get(key) === session) {
       sessions.delete(key);
       addLog('info', `Bot ${bot.number} voice session ended.`);
+      const desired = desiredChannels.get(key);
+      if (desired) scheduleKeepAlive(bot, guild, desired.channelId);
     }
   });
   addLog('info', `Bot ${bot.number} is joining voice channel ${channel.id}.`);
@@ -155,6 +190,7 @@ async function connectToChannel(bot, guild, channel, attempt = 0) {
     safelyDestroy(connection);
     sessions.delete(key);
     if (attempt >= 2) {
+      scheduleKeepAlive(bot, guild, channel.id);
       throw new Error(error.code === 'ABORT_ERR'
         ? 'Discord voice UDP handshake timed out after 3 fresh attempts. Check Render outbound UDP support and the bot voice permissions.'
         : error.message);
@@ -208,9 +244,16 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, filen
         : null;
       const guild = (requestedChannel?.guild) || bot.client.guilds.cache.get(guildIdToControl);
       if (action === 'disconnect' && !guildIdToControl && !requestedChannel) {
-        const completed = [...sessions.keys()]
-          .filter((key) => key.startsWith(`${bot.number}:`))
-          .map((key) => disconnect(bot.number, key.split(':')[1]))
+        const guildIds = new Set([
+          ...[...sessions.keys()]
+            .filter((key) => key.startsWith(`${bot.number}:`))
+            .map((key) => key.split(':')[1]),
+          ...[...desiredChannels.keys()]
+            .filter((key) => key.startsWith(`${bot.number}:`))
+            .map((key) => key.split(':')[1]),
+        ]);
+        const completed = [...guildIds]
+          .map((guildId) => { clearDesiredChannel(bot.number, guildId); return disconnect(bot.number, guildId); })
           .some(Boolean);
         return { bot: bot.number, completed };
       }
@@ -221,13 +264,17 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, filen
         return { bot: bot.number, completed };
       }
       if (!guild) throw new Error(`Cannot access channel ${channelIdToControl}. Invite Bot ${bot.number} to the channel's server.`);
-      if (action === 'disconnect') return { bot: bot.number, completed: disconnect(bot.number, guild.id) };
+      if (action === 'disconnect') {
+        clearDesiredChannel(bot.number, guild.id);
+        return { bot: bot.number, completed: disconnect(bot.number, guild.id) };
+      }
       const session = sessions.get(`${bot.number}:${guild.id}`);
       if (action === 'stop') {
         stopSessionAudio(session);
         return { bot: bot.number, completed: Boolean(session) };
       }
       const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
+      desiredChannels.set(desiredKey(bot.number, guild.id), { channelId: channel.id });
       const connected = await connectToChannel(bot, guild, channel);
       if (action === 'play') await playInDiscord(bot, connected, filename);
       return { bot: bot.number, completed: true, state: sessions.get(`${bot.number}:${guild.id}`)?.connection.state.status };
@@ -268,6 +315,7 @@ async function runForAllBots(command, message) {
     }
 
     if (command === '!d') {
+      clearDesiredChannel(bot.number, message.guild.id);
       return disconnect(bot.number, message.guild.id) ? `Bot ${bot.number} disconnected` : `Bot ${bot.number} was not connected`;
     }
 
