@@ -33,6 +33,7 @@
     .log.error { color: #ff9c8d; }
     .audio-list { display: grid; gap: 10px; }
     .audio-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; align-items: center; }
+    .audio-row button { margin-top: 7px; padding: 9px; }
     audio { width: 100%; }
     @media (max-width: 580px) { .grid, .actions { grid-template-columns: 1fr; } main { padding: 36px 0; } }
   </style>
@@ -105,7 +106,17 @@
     async function loadAudio() {
       const response = await fetch('/api/audio', { headers: headers() });
       const data = await response.json();
-      document.querySelector('#audioList').innerHTML = data.map(file => `<div class="audio-row"><span>${file.name}</span><audio controls preload="none" src="${file.url}"></audio></div>`).join('') || '<div class="muted">No uploaded audio yet.</div>';
+      document.querySelector('#audioList').innerHTML = data.map(file => `<div class="audio-row"><span>${file.name}<button class="play-audio" data-file="${file.name}" type="button">Play in Discord</button></span><audio controls preload="none" src="${file.url}"></audio></div>`).join('') || '<div class="muted">No uploaded audio yet.</div>';
+      document.querySelectorAll('.play-audio').forEach(button => button.addEventListener('click', async () => {
+        const channelId = channelIdInput.value.trim();
+        const audioStatus = document.querySelector('#audioStatus');
+        if (!channelId) { audioStatus.textContent = 'Enter a voice channel ID before playing in Discord.'; return; }
+        audioStatus.textContent = `Sending ${button.dataset.file} to all connected bots...`;
+        const response = await fetch('/api/control', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'play', channelId, filename: button.dataset.file }) });
+        const result = await response.json();
+        audioStatus.textContent = response.ok ? `${result.completed}/${result.total} bots are playing ${button.dataset.file}.` : result.error;
+        loadLogs();
+      }));
     }
     document.querySelector('#saveKey').addEventListener('click', () => {
       key = keyInput.value.trim();

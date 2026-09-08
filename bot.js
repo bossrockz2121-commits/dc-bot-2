@@ -2,8 +2,10 @@ require('dotenv').config();
 
 const path = require('node:path');
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const express = require('express');
 const multer = require('multer');
+const ffmpegPath = require('ffmpeg-static');
 const {
   Client,
   GatewayIntentBits,
@@ -40,6 +42,25 @@ function configuredBots() {
 
 const sessions = new Map();
 const bots = [];
+
+function getAudioPath(filename) {
+  if (!filename || path.basename(filename) !== filename) return null;
+  const filePath = path.join(audioDir, filename);
+  return fs.existsSync(filePath) ? filePath : null;
+}
+
+function playInDiscord(bot, session, filename) {
+  const audioPath = getAudioPath(filename);
+  if (!audioPath) throw new Error(`Audio file ${filename} was not found.`);
+  const ffmpeg = spawn(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error', '-i', audioPath,
+    '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1',
+  ]);
+  ffmpeg.stderr.on('data', (data) => addLog('error', `Bot ${bot.number} audio: ${data.toString().trim()}`));
+  ffmpeg.on('error', (error) => addLog('error', `Bot ${bot.number} audio process failed: ${error.message}`));
+  const { createAudioResource, StreamType } = require('@discordjs/voice');
+  session.player.play(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
+}
 
 async function connectToMemberChannel(bot, member) {
   if (!member.voice.channel) throw new Error('Join a voice channel first.');
@@ -129,7 +150,7 @@ function safelyDestroy(connection) {
   }
 }
 
-async function runWebControl(action, guildIdToControl, channelIdToControl) {
+async function runWebControl(action, guildIdToControl, channelIdToControl, filename) {
   const activeBots = bots.filter((bot) => bot.status === 'online');
   if (!activeBots.length) {
     const details = bots.map((bot) => `Bot ${bot.number}: ${bot.statusMessage || bot.status}`).join(' | ');
@@ -166,7 +187,8 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
         return { bot: bot.number, completed: Boolean(session) };
       }
       const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
-      await connectToChannel(bot, guild, channel);
+      const connected = await connectToChannel(bot, guild, channel);
+      if (action === 'play') playInDiscord(bot, connected, filename);
       return { bot: bot.number, completed: true, state: sessions.get(`${bot.number}:${guild.id}`)?.connection.state.status };
     } catch (error) {
       return { bot: bot.number, completed: false, error: error.message };
@@ -299,15 +321,16 @@ app.get('/api/discord-context', requireAdmin, (request, response) => {
   response.json({ guilds });
 });
 app.post('/api/control', requireAdmin, async (request, response) => {
-  const { action, guildId: targetGuildId, channelId: targetChannelId } = request.body || {};
-  if (!['join', 'stop', 'disconnect'].includes(action)) {
+  const { action, guildId: targetGuildId, channelId: targetChannelId, filename } = request.body || {};
+  if (!['join', 'stop', 'disconnect', 'play'].includes(action)) {
     return response.status(400).json({ error: 'Choose a valid server and action.' });
   }
-  if (action === 'join' && !/^\d{17,20}$/.test(targetChannelId || '')) {
+  if (['join', 'play'].includes(action) && !/^\d{17,20}$/.test(targetChannelId || '')) {
     return response.status(400).json({ error: 'Choose a voice channel.' });
   }
+  if (action === 'play' && !getAudioPath(filename)) return response.status(400).json({ error: 'Choose a valid uploaded audio file.' });
   try {
-    response.json(await runWebControl(action, targetGuildId, targetChannelId));
+    response.json(await runWebControl(action, targetGuildId, targetChannelId, filename));
   } catch (error) {
     response.status(400).json({ error: error.message });
   }
