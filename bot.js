@@ -63,21 +63,41 @@ async function playInDiscord(bot, session, filename) {
   session.audioProcess = ffmpeg;
   let ffmpegError = '';
   ffmpeg.stderr.on('data', (data) => {
+    if (session.suppressAudioErrorsUntil > Date.now()) return;
     ffmpegError += data.toString();
     addLog('error', `Bot ${bot.number} audio: ${data.toString().trim()}`);
   });
-  ffmpeg.on('error', (error) => addLog('error', `Bot ${bot.number} audio process failed: ${error.message}`));
+  ffmpeg.on('error', (error) => {
+    if (session.suppressAudioErrorsUntil > Date.now()) return;
+    addLog('error', `Bot ${bot.number} audio process failed: ${error.message}`);
+  });
+  ffmpeg.on('close', () => {
+    if (session.audioProcess === ffmpeg) session.audioProcess = null;
+  });
   session.player.play(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
-  const started = new Promise((resolve) => {
+  let onPlayerError;
+  const started = new Promise((resolve, reject) => {
     if (session.player.state.status === AudioPlayerStatus.Playing) resolve();
     else session.player.once(AudioPlayerStatus.Playing, resolve);
+    onPlayerError = (error) => reject(error);
+    session.player.once('error', onPlayerError);
   });
-  const failed = new Promise((_, reject) => session.player.once('error', reject));
   try {
-    await Promise.race([started, failed, new Promise((_, reject) => setTimeout(() => reject(new Error(`Audio did not start${ffmpegError ? `: ${ffmpegError.trim()}` : '.'}`)), 15_000))]);
+    await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error(`Audio did not start${ffmpegError ? `: ${ffmpegError.trim()}` : '.'}`)), 15_000))]);
     addLog('info', `Bot ${bot.number} started playing ${filename}.`);
   } finally {
+    session.player.removeListener('error', onPlayerError);
+  }
+}
+
+function stopSessionAudio(session) {
+  if (!session) return;
+  session.suppressAudioErrorsUntil = Date.now() + 2_000;
+  session.player.stop(true);
+  if (session.audioProcess) {
+    const process = session.audioProcess;
     session.audioProcess = null;
+    process.kill();
   }
 }
 
@@ -195,15 +215,14 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, filen
       if (action === 'stop' && !guildIdToControl && !requestedChannel) {
         const completed = [...sessions.entries()]
           .filter(([key]) => key.startsWith(`${bot.number}:`))
-          .map(([, session]) => { session.player.stop(); if (session.audioProcess) session.audioProcess.kill(); return true; }).length > 0;
+          .map(([, session]) => { stopSessionAudio(session); return true; }).length > 0;
         return { bot: bot.number, completed };
       }
       if (!guild) throw new Error(`Cannot access channel ${channelIdToControl}. Invite Bot ${bot.number} to the channel's server.`);
       if (action === 'disconnect') return { bot: bot.number, completed: disconnect(bot.number, guild.id) };
       const session = sessions.get(`${bot.number}:${guild.id}`);
       if (action === 'stop') {
-        session?.player.stop();
-        if (session?.audioProcess) session.audioProcess.kill();
+        stopSessionAudio(session);
         return { bot: bot.number, completed: Boolean(session) };
       }
       const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
@@ -231,8 +250,7 @@ function disconnect(botNumber, guildIdToDisconnect) {
   const session = sessions.get(key);
   if (!session) return false;
   sessions.delete(key);
-  session.player.stop();
-  if (session.audioProcess) session.audioProcess.kill();
+  stopSessionAudio(session);
   safelyDestroy(session.connection);
   return true;
 }
