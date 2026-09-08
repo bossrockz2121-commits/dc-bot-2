@@ -3,6 +3,7 @@ require('dotenv').config();
 const {
 	Client,
 	GatewayIntentBits,
+	PermissionFlagsBits,
 	REST,
 	Routes,
 	SlashCommandBuilder,
@@ -60,6 +61,12 @@ const audioFiles = { '!j1': '1.mp3', '!j2': '2.mp3', '!j3': '4.mp3', '!j4': '5.m
 async function connectToMemberChannel(member) {
 	if (!member.voice.channel) throw new Error('Join a voice channel first.');
 
+	const botMember = member.guild.members.me;
+	const voicePermissions = botMember && member.voice.channel.permissionsFor(botMember);
+	if (!voicePermissions?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
+		throw new Error('I need Connect and Speak permissions in that voice channel.');
+	}
+
 	const existingSession = voiceSessions.get(member.guild.id);
 	if (existingSession && existingSession.channelId === member.voice.channel.id) return existingSession;
 	if (existingSession) existingSession.connection.destroy();
@@ -71,14 +78,18 @@ async function connectToMemberChannel(member) {
 	});
 	const player = createAudioPlayer();
 	connection.subscribe(player);
+	connection.on('error', (error) => console.error('Discord voice connection error:', error));
 	const session = { channelId: member.voice.channel.id, connection, player };
 	voiceSessions.set(member.guild.id, session);
 
 	try {
-		await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+		await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
 	} catch (error) {
 		connection.destroy();
 		voiceSessions.delete(member.guild.id);
+		if (error.code === 'ABORT_ERR') {
+			throw new Error('Discord voice connection timed out. Check my Connect and Speak permissions, then try again.');
+		}
 		throw error;
 	}
 	return session;
