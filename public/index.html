@@ -133,7 +133,7 @@
       status.textContent = 'Sending command to all online bots...';
       const response = await fetch('/api/control', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ action, channelId }) });
       const result = await response.json();
-      status.textContent = response.ok ? `${result.completed}/${result.total} bots completed ${action}.` : result.error;
+      status.textContent = response.ok ? `${result.completed}/${result.total} bots completed ${action}.${result.errors?.length ? ` ${result.errors.join(' ')}` : ''}` : result.error;
       loadLogs();
     }));
     if (key) loadStatus().catch(error => authStatus.textContent = error.message);

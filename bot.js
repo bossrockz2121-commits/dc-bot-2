@@ -47,7 +47,8 @@ async function connectToMemberChannel(bot, member) {
 }
 
 async function connectToChannel(bot, guild, channel) {
-  const permission = channel.permissionsFor(guild.members.me);
+  const botMember = guild.members.me || await guild.members.fetchMe();
+  const permission = channel.permissionsFor(botMember);
   if (!permission?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
     throw new Error('I need Connect and Speak permissions in that voice channel.');
   }
@@ -87,7 +88,9 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
     throw new Error(`No bots are online. ${details || 'Add DISCORD_TOKEN_1 through DISCORD_TOKEN_5 in Render.'}`);
   }
   const results = await Promise.allSettled(activeBots.map(async (bot) => {
-    const requestedChannel = channelIdToControl && bot.client.channels.cache.get(channelIdToControl);
+    const requestedChannel = channelIdToControl
+      ? await bot.client.channels.fetch(channelIdToControl).catch(() => null)
+      : null;
     const guild = (requestedChannel?.guild) || bot.client.guilds.cache.get(guildIdToControl);
     if (action === 'disconnect' && !guildIdToControl && !requestedChannel) {
       const disconnected = [...sessions.keys()]
@@ -102,7 +105,7 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
         .map(([, session]) => { session.player.stop(); return true; });
       return stopped.length > 0;
     }
-    if (!guild) throw new Error(`Bot ${bot.number} is not in that server.`);
+    if (!guild) throw new Error(`Bot ${bot.number} cannot access channel ${channelIdToControl}. Check the channel ID and invite this bot to its server.`);
 
     if (action === 'disconnect') return disconnect(bot.number, guild.id);
     const session = sessions.get(`${bot.number}:${guild.id}`);
@@ -122,7 +125,8 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
     total: results.length,
     errors: failed.map((result) => result.reason?.message || 'Command failed'),
   };
-  addLog(failed.length ? 'error' : 'info', `Web control ${action}: ${summary.completed}/${summary.total} bots completed.`);
+  const detail = summary.errors.length ? ` Errors: ${summary.errors.join(' | ')}` : '';
+  addLog(failed.length ? 'error' : 'info', `Web control ${action}: ${summary.completed}/${summary.total} bots completed.${detail}`);
   return summary;
 }
 
