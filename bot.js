@@ -55,8 +55,8 @@ async function connectToChannel(bot, guild, channel) {
 
   const key = `${bot.number}:${guild.id}`;
   const existing = sessions.get(key);
-  if (existing && existing.channelId === channel.id) return existing;
-  if (existing) existing.connection.destroy();
+  if (existing && existing.channelId === channel.id && existing.connection.state.status !== VoiceConnectionStatus.Destroyed) return existing;
+  if (existing) safelyDestroy(existing.connection);
 
   const connection = joinVoiceChannel({
     channelId: channel.id,
@@ -68,16 +68,32 @@ async function connectToChannel(bot, guild, channel) {
   connection.on('error', (error) => console.error(`Bot ${bot.number} voice error:`, error));
   const session = { channelId: channel.id, connection, player };
   sessions.set(key, session);
+  connection.on('stateChange', (oldState, newState) => {
+    if (newState.status === VoiceConnectionStatus.Destroyed && sessions.get(key) === session) {
+      sessions.delete(key);
+      addLog('info', `Bot ${bot.number} voice session ended.`);
+    }
+  });
+  addLog('info', `Bot ${bot.number} is joining voice channel ${channel.id}.`);
 
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
     return session;
   } catch (error) {
-    connection.destroy();
+    safelyDestroy(connection);
     sessions.delete(key);
     throw new Error(error.code === 'ABORT_ERR'
       ? 'Voice connection timed out. Check Connect and Speak permissions.'
       : error.message);
+  }
+}
+
+function safelyDestroy(connection) {
+  if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) return;
+  try {
+    connection.destroy();
+  } catch (error) {
+    if (!/already been destroyed/i.test(error.message)) throw error;
   }
 }
 
@@ -134,9 +150,9 @@ function disconnect(botNumber, guildIdToDisconnect) {
   const key = `${botNumber}:${guildIdToDisconnect}`;
   const session = sessions.get(key);
   if (!session) return false;
-  session.player.stop();
-  session.connection.destroy();
   sessions.delete(key);
+  session.player.stop();
+  safelyDestroy(session.connection);
   return true;
 }
 
