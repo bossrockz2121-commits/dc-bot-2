@@ -93,7 +93,8 @@ async function connectToChannel(bot, guild, channel) {
     try {
       connection.rejoin({ channelId: channel.id, selfDeaf: false, selfMute: false });
       await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-      addLog('info', `Bot ${bot.number} voice reconnect succeeded.`);
+      await confirmVoicePresence(bot, guild, channel.id);
+      addLog('info', `Bot ${bot.number} voice reconnect confirmed in channel ${channel.id}.`);
       return session;
     } catch (retryError) {
       addLog('error', `Bot ${bot.number} voice retry failed in state ${connection.state.status}: ${retryError.message}.`);
@@ -108,6 +109,8 @@ async function connectToChannel(bot, guild, channel) {
 
 async function confirmVoicePresence(bot, guild, channelId) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
+    const cachedVoiceState = guild.voiceStates.cache.get(bot.client.user.id);
+    if (cachedVoiceState?.channelId === channelId) return;
     const member = await guild.members.fetch(bot.client.user.id).catch(() => null);
     if (member?.voice?.channelId === channelId) return;
     await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -235,6 +238,11 @@ function attachBot(bot) {
     botState.statusMessage = 'Connected to Discord';
     botState.tag = readyClient.user.tag;
     addLog('info', `Bot ${bot.number} login successful as ${readyClient.user.tag}. Servers: ${readyClient.guilds.cache.size}.`);
+  });
+
+  client.on('voiceStateUpdate', (oldState, newState) => {
+    if (newState.id !== client.user?.id) return;
+    addLog('info', `Bot ${bot.number} Discord voice state: ${oldState.channelId || 'none'} -> ${newState.channelId || 'none'}.`);
   });
 
   client.on('messageCreate', async (message) => {
