@@ -65,6 +65,8 @@ async function connectToChannel(bot, guild, channel) {
     channelId: channel.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
+    // Each bot is a separate Discord client, so it needs its own voice connection group.
+    group: `bot-${bot.number}`,
     selfDeaf: false,
     selfMute: false,
   });
