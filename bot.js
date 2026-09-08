@@ -1,51 +1,22 @@
 require('dotenv').config();
 
-const fs = require('node:fs');
-const http = require('node:http');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
 const express = require('express');
-const multer = require('multer');
 const {
   Client,
   GatewayIntentBits,
   PermissionFlagsBits,
 } = require('discord.js');
 const {
-  StreamType,
   VoiceConnectionStatus,
   createAudioPlayer,
-  createAudioResource,
   entersState,
   joinVoiceChannel,
 } = require('@discordjs/voice');
-const ffmpegPath = require('ffmpeg-static');
-
 const rootDir = __dirname;
-const audioDir = path.join(rootDir, 'audio');
-const configPath = path.join(rootDir, 'audio-config.json');
 const port = Number(process.env.PORT) || 10000;
 const adminKey = process.env.WEB_ADMIN_KEY;
 const guildId = /^\d{17,20}$/.test(process.env.GUILD_ID || '') ? process.env.GUILD_ID : undefined;
-const audioSlots = ['j1', 'j2', 'j3', 'j4', 'j5'];
-const defaultFiles = ['1.mp3', '2.mp3', '4.mp3', '5.mp3', '6.mp3'];
-
-fs.mkdirSync(audioDir, { recursive: true });
-if (!fs.existsSync(configPath)) {
-  fs.writeFileSync(configPath, JSON.stringify({ j1: '1.mp3', j2: '2.mp3', j3: '4.mp3', j4: '5.mp3', j5: '6.mp3' }, null, 2));
-}
-
-function readAudioConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch {
-    return Object.fromEntries(audioSlots.map((slot, index) => [slot, defaultFiles[index]]));
-  }
-}
-
-function writeAudioConfig(config) {
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-}
 
 function configuredBots() {
   return Array.from({ length: 5 }, (_, index) => ({
@@ -57,15 +28,6 @@ function configuredBots() {
 
 const sessions = new Map();
 const bots = [];
-
-function getAudioFile(slot) {
-  const filename = readAudioConfig()[slot];
-  if (!filename || filename.includes('..') || path.basename(filename) !== filename) return null;
-  const filePath = path.join(audioDir, filename);
-  if (fs.existsSync(filePath)) return filePath;
-  const rootFilePath = path.join(rootDir, filename);
-  return fs.existsSync(rootFilePath) ? rootFilePath : null;
-}
 
 async function connectToMemberChannel(bot, member) {
   if (!member.voice.channel) throw new Error('Join a voice channel first.');
@@ -106,7 +68,7 @@ async function connectToChannel(bot, guild, channel) {
   }
 }
 
-async function runWebControl(action, guildIdToControl, channelIdToControl, slot) {
+async function runWebControl(action, guildIdToControl, channelIdToControl) {
   const activeBots = bots.filter((bot) => bot.status === 'online');
   if (!activeBots.length) throw new Error('No bots are online yet.');
   const results = await Promise.allSettled(activeBots.map(async (bot) => {
@@ -123,8 +85,7 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, slot)
 
     const channel = requestedChannel || guild.channels.cache.get(channelIdToControl);
     if (!channel?.isVoiceBased()) throw new Error(`Voice channel was not found for bot ${bot.number}.`);
-    const connected = await connectToChannel(bot, guild, channel);
-    if (action === 'play') playAudio(bot, guild.id, connected, slot);
+    await connectToChannel(bot, guild, channel);
     return true;
   }));
   const failed = results.filter((result) => result.status === 'rejected');
@@ -133,15 +94,6 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, slot)
     total: results.length,
     errors: failed.map((result) => result.reason?.message || 'Command failed'),
   };
-}
-
-function playAudio(bot, guildIdToPlay, session, slot) {
-  const audioPath = getAudioFile(slot);
-  if (!audioPath) throw new Error(`No audio file is assigned to !${slot}. Upload one in the web dashboard.`);
-  const ffmpeg = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', audioPath, '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1']);
-  ffmpeg.stderr.on('data', (data) => console.error(`Bot ${bot.number} FFmpeg: ${data}`));
-  ffmpeg.on('error', (error) => console.error(`Bot ${bot.number} audio error:`, error));
-  session.player.play(createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw }));
 }
 
 function disconnect(botNumber, guildIdToDisconnect) {
@@ -174,12 +126,6 @@ async function runForAllBots(command, message) {
       return session ? `Bot ${bot.number} stopped` : `Bot ${bot.number} was not playing`;
     }
 
-    if (/^!j[1-5]$/.test(command)) {
-      const session = await connectToMemberChannel(bot, message.member);
-      playAudio(bot, message.guild.id, session, command.slice(1));
-      return `Bot ${bot.number} playing ${command}`;
-    }
-
     return null;
   }));
 
@@ -207,7 +153,7 @@ function attachBot(bot) {
     const controller = bots.find((candidate) => candidate.status === 'online');
     if (controller && botState.number !== controller.number) return;
     try {
-      if (['!j', '!s', '!d'].includes(command) || /^!j[1-5]$/.test(command)) {
+      if (['!j', '!s', '!d'].includes(command)) {
         await message.reply(await runForAllBots(command, message));
       }
     } catch (error) {
@@ -227,11 +173,6 @@ function requireAdmin(request, response, next) {
   next();
 }
 
-const upload = multer({
-  dest: audioDir,
-  limits: { fileSize: 25 * 1024 * 1024 },
-  fileFilter: (request, file, callback) => callback(null, /^audio\//.test(file.mimetype) || /\.(mp3|wav|ogg|m4a)$/i.test(file.originalname)),
-});
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(rootDir, 'public')));
@@ -250,54 +191,22 @@ app.get('/api/discord-context', requireAdmin, (request, response) => {
   response.json({ guilds });
 });
 app.post('/api/control', requireAdmin, async (request, response) => {
-  const { action, guildId: targetGuildId, channelId: targetChannelId, slot } = request.body || {};
-  if (!['join', 'stop', 'disconnect', 'play'].includes(action)) {
+  const { action, guildId: targetGuildId, channelId: targetChannelId } = request.body || {};
+  if (!['join', 'stop', 'disconnect'].includes(action)) {
     return response.status(400).json({ error: 'Choose a valid server and action.' });
   }
-  if (['join', 'play'].includes(action) && !/^\d{17,20}$/.test(targetChannelId || '')) {
+  if (action === 'join' && !/^\d{17,20}$/.test(targetChannelId || '')) {
     return response.status(400).json({ error: 'Choose a voice channel.' });
   }
   if (['stop', 'disconnect'].includes(action) && !/^\d{17,20}$/.test(targetGuildId || '')) {
     return response.status(400).json({ error: 'Choose a server for this action.' });
   }
-  if (action === 'play' && !audioSlots.includes(slot)) return response.status(400).json({ error: 'Choose an audio slot.' });
   try {
-    response.json(await runWebControl(action, targetGuildId, targetChannelId, slot));
+    response.json(await runWebControl(action, targetGuildId, targetChannelId));
   } catch (error) {
     response.status(400).json({ error: error.message });
   }
 });
-app.get('/api/audio', requireAdmin, (request, response) => {
-  const files = fs.readdirSync(audioDir).filter((file) => /\.(mp3|wav|ogg|m4a)$/i.test(file)).concat(defaultFiles.filter((file) => fs.existsSync(path.join(rootDir, file))));
-  const config = readAudioConfig();
-  response.json({ files: [...new Set(files)].sort(), slots: audioSlots.map((slot) => ({ slot, file: config[slot] || '', url: config[slot] ? `/audio/${encodeURIComponent(config[slot])}` : null })) });
-});
-app.use('/audio', express.static(audioDir));
-app.get('/audio/:filename', (request, response) => {
-  const filename = path.basename(request.params.filename);
-  const rootFile = path.join(rootDir, filename);
-  if (defaultFiles.includes(filename) && fs.existsSync(rootFile)) return response.sendFile(rootFile);
-  response.sendStatus(404);
-});
-app.post('/api/audio/upload', requireAdmin, upload.single('audio'), (request, response) => {
-  if (!request.file) return response.status(400).json({ error: 'Upload an audio file.' });
-  const extension = path.extname(request.file.originalname).toLowerCase() || '.mp3';
-  const safeName = `${Date.now()}-${path.basename(request.file.originalname, extension).replace(/[^a-z0-9_-]/gi, '-')}${extension}`;
-  fs.renameSync(request.file.path, path.join(audioDir, safeName));
-  response.json({ file: safeName });
-});
-app.post('/api/audio/assign', requireAdmin, (request, response) => {
-  const { slot, file } = request.body || {};
-  if (!audioSlots.includes(slot) || !file || path.basename(file) !== file || !getAudioFileForName(file)) return response.status(400).json({ error: 'Invalid audio assignment.' });
-  const config = readAudioConfig();
-  config[slot] = file;
-  writeAudioConfig(config);
-  response.json({ ok: true });
-});
-
-function getAudioFileForName(filename) {
-  return fs.existsSync(path.join(audioDir, filename)) || fs.existsSync(path.join(rootDir, filename));
-}
 
 app.listen(port, '0.0.0.0', () => console.log(`Web dashboard listening on port ${port}`));
 
