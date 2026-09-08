@@ -16,6 +16,7 @@ const {
 	joinVoiceChannel,
 } = require('@discordjs/voice');
 const { spawn } = require('node:child_process');
+const http = require('node:http');
 const path = require('node:path');
 const ffmpegPath = require('ffmpeg-static');
 
@@ -146,6 +147,21 @@ client.on('interactionCreate', async (interaction) => {
 		if (!interaction.guild) return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
 		await interaction.reply(`**${interaction.guild.name}**\nMembers: ${interaction.guild.memberCount}\nCreated: ${interaction.guild.createdAt.toDateString()}`);
 	}
+});
+
+const port = Number(process.env.PORT) || 10000;
+const healthServer = http.createServer((request, response) => {
+	if (request.url === '/health') {
+		response.writeHead(200, { 'Content-Type': 'application/json' });
+		response.end(JSON.stringify({ status: 'ok', discord: client.isReady() }));
+		return;
+	}
+	response.writeHead(200, { 'Content-Type': 'text/plain' });
+	response.end('Discord bot is running.');
+});
+
+healthServer.listen(port, '0.0.0.0', () => {
+	console.log(`Health server listening on port ${port}`);
 });
 
 registerCommands()
