@@ -21,7 +21,10 @@ const ffmpegPath = require('ffmpeg-static');
 
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID;
+const configuredGuildId = process.env.GUILD_ID?.trim();
+const guildId = configuredGuildId && /^\d{17,20}$/.test(configuredGuildId)
+	? configuredGuildId
+	: undefined;
 
 if (!token || token === 'replace-with-a-new-token') {
 	throw new Error('DISCORD_TOKEN is missing. Add a newly generated token to .env.');
@@ -29,6 +32,10 @@ if (!token || token === 'replace-with-a-new-token') {
 
 if (!clientId) {
 	throw new Error('CLIENT_ID is missing. Add your application client ID to .env.');
+}
+
+if (configuredGuildId && !guildId) {
+	console.warn('GUILD_ID is not a valid Discord server ID. Using global command registration.');
 }
 
 const commands = [
