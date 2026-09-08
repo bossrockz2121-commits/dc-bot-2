@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Discord audio control</title>
+  <style>
+    :root { color-scheme: dark; font-family: Georgia, serif; background: #12100d; color: #f6eddf; }
+    body { margin: 0; background: radial-gradient(circle at top right, #473725, #12100d 58%); min-height: 100vh; }
+    main { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+    header { display: flex; justify-content: space-between; align-items: end; gap: 24px; border-bottom: 1px solid #5b4937; padding-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(2.3rem, 6vw, 5rem); font-weight: 400; line-height: .95; letter-spacing: 0; }
+    .kicker { color: #e6ac6e; text-transform: uppercase; letter-spacing: .16em; font: 700 .72rem Arial, sans-serif; }
+    .panel { margin-top: 28px; border: 1px solid #5b4937; background: #1c1712cc; padding: 24px; }
+    .panel h2 { margin: 0 0 16px; font-size: 1.35rem; font-weight: 400; }
+    .slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+    .slot { border: 1px solid #5b4937; padding: 16px; background: #251d16; }
+    .slot strong { display: block; color: #e6ac6e; margin-bottom: 8px; }
+    .slot audio { width: 100%; margin-top: 12px; }
+    label { display: block; font: 700 .78rem Arial, sans-serif; color: #c6b5a0; margin: 16px 0 7px; }
+    input, select, button { width: 100%; box-sizing: border-box; border: 1px solid #80684e; background: #120f0c; color: #f6eddf; padding: 11px 12px; font: inherit; }
+    button { cursor: pointer; background: #e6ac6e; border-color: #e6ac6e; color: #1c130c; font: 700 .82rem Arial, sans-serif; text-transform: uppercase; letter-spacing: .08em; }
+    button:hover { background: #f2c48c; }
+    .row { display: grid; grid-template-columns: 1fr 180px; gap: 12px; align-items: end; }
+    .status { min-height: 1.3em; color: #e6ac6e; }
+    .muted { color: #c6b5a0; font: .95rem/1.5 Arial, sans-serif; }
+    @media (max-width: 620px) { header, .row { display: block; } header .muted { margin-top: 18px; } .row button { margin-top: 12px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><div class="kicker">Five bot audio desk</div><h1>Set the sound.</h1></div>
+      <p class="muted">Upload a file, assign it to a command slot, and all five bots use the same audio library.</p>
+    </header>
+    <section class="panel">
+      <h2>Audio library</h2>
+      <form id="uploadForm" class="row">
+        <div><label for="audio">Audio file</label><input id="audio" name="audio" type="file" accept="audio/*" required></div>
+        <button type="submit">Upload audio</button>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+    <section class="panel">
+      <h2>Command slots</h2>
+      <p class="muted">The assigned file plays when any bot receives the matching command.</p>
+      <div id="slots" class="slots"></div>
+    </section>
+  </main>
+  <script>
+    const key = new URLSearchParams(location.search).get('key') || localStorage.getItem('dashboardKey') || '';
+    if (key) localStorage.setItem('dashboardKey', key);
+    const headers = { 'x-admin-key': key };
+    const status = document.querySelector('#status');
+    const slots = document.querySelector('#slots');
+    async function load() {
+      const response = await fetch('/api/audio', { headers });
+      if (!response.ok) throw new Error('Dashboard key is missing or invalid.');
+      const data = await response.json();
+      slots.innerHTML = data.slots.map(slot => `<article class="slot"><strong>!${slot.slot}</strong><select data-slot="${slot.slot}">${data.files.map(file => `<option value="${file}" ${file === slot.file ? 'selected' : ''}>${file}</option>`).join('')}</select>${slot.url ? `<audio controls src="${slot.url}"></audio>` : ''}</article>`).join('');
+      slots.querySelectorAll('select').forEach(select => select.addEventListener('change', async () => {
+        const response = await fetch('/api/audio/assign', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ slot: select.dataset.slot, file: select.value }) });
+        status.textContent = response.ok ? 'Assignment saved.' : 'Could not save assignment.';
+      }));
+    }
+    document.querySelector('#uploadForm').addEventListener('submit', async event => {
+      event.preventDefault(); status.textContent = 'Uploading...';
+      const response = await fetch('/api/audio/upload', { method: 'POST', headers, body: new FormData(event.target) });
+      status.textContent = response.ok ? 'Uploaded.' : 'Upload failed.';
+      if (response.ok) { event.target.reset(); load(); }
+    });
+    load().catch(error => status.textContent = error.message);
+  </script>
+</body>
+</html>

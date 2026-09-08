@@ -1,19 +1,20 @@
 # Discord Bot Starter
 
-A Discord bot using Node.js and discord.js that can play the included MP3 files.
+A five-bot Discord audio system using Node.js and discord.js. Every configured bot responds to the same voice commands and shares a web-managed audio library.
 
 ## Setup
 
-1. In the Discord Developer Portal, revoke the token that was previously shared and generate a new one.
+1. Revoke every token previously shared in chat and generate a new token for each bot.
 2. Create a `.env` file by copying `.env.example`.
-3. Fill in `DISCORD_TOKEN`, `CLIENT_ID`, and optionally `GUILD_ID`.
-4. Install dependencies:
+3. Fill in `DISCORD_TOKEN_1` through `DISCORD_TOKEN_5`, matching `CLIENT_ID_1` through `CLIENT_ID_5`.
+4. Set a private `WEB_ADMIN_KEY` for the audio dashboard. Leave `GUILD_ID` empty unless it is a real numeric server ID.
+5. Install dependencies:
 
    ```powershell
    npm install
    ```
 
-5. Start the bot:
+6. Start the bot:
 
    ```powershell
    npm start
@@ -27,11 +28,7 @@ The user and bot must be in the same server. Use these commands in a text channe
 | --- | --- |
 | `!j` | Join your voice channel |
 | `!d` | Disconnect from voice |
-| `!j1` | Play `1.mp3` |
-| `!j2` | Play `2.mp3` |
-| `!j3` | Play `4.mp3` |
-| `!j4` | Play `5.mp3` |
-| `!j5` | Play `6.mp3` |
+| `!j1` through `!j5` | Join and play the assigned audio slot |
 | `!s` | Stop the current audio |
 
 In the Developer Portal, enable the **Message Content Intent** under **Bot → Privileged Gateway Intents**. The bot also needs the `View Channel`, `Connect`, and `Speak` permissions in the voice channel.
@@ -54,3 +51,7 @@ In the Developer Portal, create an OAuth2 invite URL with these scopes:
 - `applications.commands`
 
 The bot only needs the `Send Messages` permission for the included commands.
+
+## Web audio dashboard
+
+Open the deployed service URL with `?key=YOUR_WEB_ADMIN_KEY`, for example `https://your-service.onrender.com/?key=...`. Upload audio files and assign them to `!j1` through `!j5`. The dashboard key is stored in the browser after the first visit. Uploaded files are runtime data; configure persistent storage in Render if uploads must survive redeploys.
