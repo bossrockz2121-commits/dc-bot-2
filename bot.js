@@ -23,7 +23,8 @@ function configuredBots() {
     number: index + 1,
     token: process.env[`DISCORD_TOKEN_${index + 1}`],
     clientId: process.env[`CLIENT_ID_${index + 1}`],
-  })).filter((bot) => bot.token && !bot.token.startsWith('replace-with-'));
+    status: process.env[`DISCORD_TOKEN_${index + 1}`] && !process.env[`DISCORD_TOKEN_${index + 1}`].startsWith('replace-with-') ? 'starting' : 'missing-token',
+  }));
 }
 
 const sessions = new Map();
@@ -70,7 +71,10 @@ async function connectToChannel(bot, guild, channel) {
 
 async function runWebControl(action, guildIdToControl, channelIdToControl) {
   const activeBots = bots.filter((bot) => bot.status === 'online');
-  if (!activeBots.length) throw new Error('No bots are online yet.');
+  if (!activeBots.length) {
+    const details = bots.map((bot) => `Bot ${bot.number}: ${bot.statusMessage || bot.status}`).join(' | ');
+    throw new Error(`No bots are online. ${details || 'Add DISCORD_TOKEN_1 through DISCORD_TOKEN_5 in Render.'}`);
+  }
   const results = await Promise.allSettled(activeBots.map(async (bot) => {
     const requestedChannel = channelIdToControl && bot.client.channels.cache.get(channelIdToControl);
     const guild = (requestedChannel?.guild) || bot.client.guilds.cache.get(guildIdToControl);
@@ -150,12 +154,17 @@ async function runForAllBots(command, message) {
 }
 
 function attachBot(bot) {
+  if (!bot.token || bot.token.startsWith('replace-with-')) {
+    bots.push({ ...bot, client: null, status: 'missing-token', statusMessage: 'Add this bot token in Render.' });
+    return;
+  }
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
-  const botState = { ...bot, client, status: 'starting' };
+  const botState = { ...bot, client, status: bot.status };
   bots.push(botState);
 
   client.once('ready', (readyClient) => {
     botState.status = 'online';
+    botState.statusMessage = 'Connected to Discord';
     botState.tag = readyClient.user.tag;
     console.log(`Bot ${bot.number} logged in as ${readyClient.user.tag}`);
   });
@@ -177,6 +186,7 @@ function attachBot(bot) {
 
   client.login(bot.token).catch((error) => {
     botState.status = 'error';
+    botState.statusMessage = error.code === 4004 ? 'Invalid token' : error.message;
     console.error(`Bot ${bot.number} failed to start:`, error.message);
   });
 }
@@ -191,7 +201,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(rootDir, 'public')));
 app.get('/health', (request, response) => response.json({ status: 'ok', bots: bots.map((bot) => ({ number: bot.number, status: bot.status })) }));
-app.get('/api/bots', requireAdmin, (request, response) => response.json(bots.map((bot) => ({ number: bot.number, status: bot.status, tag: bot.tag || null }))));
+app.get('/api/bots', requireAdmin, (request, response) => response.json(bots.map((bot) => ({ number: bot.number, status: bot.status, message: bot.statusMessage || null, tag: bot.tag || null }))));
 app.get('/api/discord-context', requireAdmin, (request, response) => {
   const controller = bots.find((bot) => bot.status === 'online');
   if (!controller) return response.json({ guilds: [] });

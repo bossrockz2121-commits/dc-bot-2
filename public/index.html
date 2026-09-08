@@ -12,6 +12,12 @@
     .eyebrow { color: #e8ae70; font: 700 .72rem Arial, sans-serif; letter-spacing: .16em; text-transform: uppercase; }
     h1 { margin: 12px 0 0; font-size: clamp(2.8rem, 8vw, 5.7rem); font-weight: 400; line-height: .9; }
     .panel { margin-top: 28px; padding: 26px; border: 1px solid #5d4d3d; background: #1b1713dd; }
+    .hidden { display: none; }
+    .login { max-width: 460px; margin: 42px auto 0; }
+    .bots { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 16px; }
+    .bot { padding: 12px 8px; border: 1px solid #5d4d3d; text-align: center; font: .76rem Arial, sans-serif; }
+    .dot { display: block; width: 9px; height: 9px; border-radius: 50%; background: #9b5147; margin: 0 auto 8px; }
+    .online .dot { background: #76b77a; }
     .muted { color: #c9b9a6; font: .95rem/1.5 Arial, sans-serif; }
     .grid { display: grid; grid-template-columns: 1fr 180px; gap: 14px; }
     label { display: block; margin: 0 0 7px; color: #c9b9a6; font: 700 .76rem Arial, sans-serif; text-transform: uppercase; letter-spacing: .08em; }
@@ -28,13 +34,18 @@
 <body>
   <main>
     <header><div class="eyebrow">Synchronized voice control</div><h1>Move the whole fleet.</h1><p class="muted">Start, stop, or disconnect every online bot from one place.</p></header>
-    <section class="panel">
+    <section id="loginPanel" class="panel login">
       <label for="adminKey">Dashboard key</label>
       <input id="adminKey" type="password" autocomplete="current-password" placeholder="Paste WEB_ADMIN_KEY from Render">
-      <button id="saveKey" type="button" style="margin-top:10px">Save key</button>
+      <button id="saveKey" type="button" style="margin-top:10px">Log in</button>
       <p id="authStatus" class="status"></p>
     </section>
-    <section class="panel">
+    <section id="controlPanel" class="panel hidden">
+      <h2>Fleet status</h2>
+      <p class="muted">All five bot slots are shown below. A red status usually means a missing or invalid Render token.</p>
+      <div id="bots" class="bots"></div>
+    </section>
+    <section id="actionsPanel" class="panel hidden">
       <label for="channelId">Discord voice channel ID</label>
       <input id="channelId" inputmode="numeric" placeholder="Paste the voice channel ID here">
       <div class="actions"><button data-action="join">Join All Bots</button><button data-action="stop">Stop All</button><button data-action="disconnect" class="danger">Disconnect All</button></div>
@@ -48,10 +59,25 @@
     keyInput.value = key;
     if (new URLSearchParams(location.search).has('key')) history.replaceState({}, '', location.pathname);
     const headers = () => ({ 'x-admin-key': key });
+    const loginPanel = document.querySelector('#loginPanel');
+    const controlPanel = document.querySelector('#controlPanel');
+    const actionsPanel = document.querySelector('#actionsPanel');
+    const botsElement = document.querySelector('#bots');
+    async function loadStatus() {
+      const response = await fetch('/api/bots', { headers: headers() });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Login failed.');
+      botsElement.innerHTML = result.map(bot => `<div class="bot ${bot.status === 'online' ? 'online' : ''}"><span class="dot"></span><strong>Bot ${bot.number}</strong><br>${bot.status}<br><small>${bot.message || bot.tag || ''}</small></div>`).join('');
+      loginPanel.classList.add('hidden');
+      controlPanel.classList.remove('hidden');
+      actionsPanel.classList.remove('hidden');
+      authStatus.textContent = 'Logged in.';
+    }
     document.querySelector('#saveKey').addEventListener('click', () => {
       key = keyInput.value.trim();
       localStorage.setItem('dashboardKey', key);
-      authStatus.textContent = key ? 'Key saved in this browser.' : 'Enter the WEB_ADMIN_KEY from Render.';
+      if (!key) { authStatus.textContent = 'Enter the WEB_ADMIN_KEY from Render.'; return; }
+      loadStatus().catch(error => authStatus.textContent = error.message);
     });
     const channelIdInput = document.querySelector('#channelId');
     const status = document.querySelector('#status');
@@ -64,6 +90,7 @@
       const result = await response.json();
       status.textContent = response.ok ? `${result.completed}/${result.total} bots completed ${action}.` : result.error;
     }));
+    if (key) loadStatus().catch(error => authStatus.textContent = error.message);
   </script>
 </body>
 </html>
