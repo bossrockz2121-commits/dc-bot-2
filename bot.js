@@ -69,25 +69,29 @@ function getAudioFile(slot) {
 
 async function connectToMemberChannel(bot, member) {
   if (!member.voice.channel) throw new Error('Join a voice channel first.');
-  const permission = member.voice.channel.permissionsFor(member.guild.members.me);
+  return connectToChannel(bot, member.guild, member.voice.channel);
+}
+
+async function connectToChannel(bot, guild, channel) {
+  const permission = channel.permissionsFor(guild.members.me);
   if (!permission?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
     throw new Error('I need Connect and Speak permissions in that voice channel.');
   }
 
-  const key = `${bot.number}:${member.guild.id}`;
+  const key = `${bot.number}:${guild.id}`;
   const existing = sessions.get(key);
-  if (existing && existing.channelId === member.voice.channel.id) return existing;
+  if (existing && existing.channelId === channel.id) return existing;
   if (existing) existing.connection.destroy();
 
   const connection = joinVoiceChannel({
-    channelId: member.voice.channel.id,
-    guildId: member.guild.id,
-    adapterCreator: member.guild.voiceAdapterCreator,
+    channelId: channel.id,
+    guildId: guild.id,
+    adapterCreator: guild.voiceAdapterCreator,
   });
   const player = createAudioPlayer();
   connection.subscribe(player);
   connection.on('error', (error) => console.error(`Bot ${bot.number} voice error:`, error));
-  const session = { channelId: member.voice.channel.id, connection, player };
+  const session = { channelId: channel.id, connection, player };
   sessions.set(key, session);
 
   try {
@@ -100,6 +104,34 @@ async function connectToMemberChannel(bot, member) {
       ? 'Voice connection timed out. Check Connect and Speak permissions.'
       : error.message);
   }
+}
+
+async function runWebControl(action, guildIdToControl, channelIdToControl, slot) {
+  const activeBots = bots.filter((bot) => bot.status === 'online');
+  if (!activeBots.length) throw new Error('No bots are online yet.');
+  const results = await Promise.allSettled(activeBots.map(async (bot) => {
+    const guild = bot.client.guilds.cache.get(guildIdToControl);
+    if (!guild) throw new Error(`Bot ${bot.number} is not in that server.`);
+
+    if (action === 'disconnect') return disconnect(bot.number, guild.id);
+    const session = sessions.get(`${bot.number}:${guild.id}`);
+    if (action === 'stop') {
+      session?.player.stop();
+      return Boolean(session);
+    }
+
+    const channel = guild.channels.cache.get(channelIdToControl);
+    if (!channel?.isVoiceBased()) throw new Error(`Voice channel was not found for bot ${bot.number}.`);
+    const connected = await connectToChannel(bot, guild, channel);
+    if (action === 'play') playAudio(bot, guild.id, connected, slot);
+    return true;
+  }));
+  const failed = results.filter((result) => result.status === 'rejected');
+  return {
+    completed: results.length - failed.length,
+    total: results.length,
+    errors: failed.map((result) => result.reason?.message || 'Command failed'),
+  };
 }
 
 function playAudio(bot, guildIdToPlay, session, slot) {
@@ -204,6 +236,33 @@ app.use(express.json());
 app.use(express.static(path.join(rootDir, 'public')));
 app.get('/health', (request, response) => response.json({ status: 'ok', bots: bots.map((bot) => ({ number: bot.number, status: bot.status })) }));
 app.get('/api/bots', requireAdmin, (request, response) => response.json(bots.map((bot) => ({ number: bot.number, status: bot.status, tag: bot.tag || null }))));
+app.get('/api/discord-context', requireAdmin, (request, response) => {
+  const controller = bots.find((bot) => bot.status === 'online');
+  if (!controller) return response.json({ guilds: [] });
+  const guilds = [...controller.client.guilds.cache.values()].map((guild) => ({
+    id: guild.id,
+    name: guild.name,
+    channels: [...guild.channels.cache.values()]
+      .filter((channel) => channel.isVoiceBased())
+      .map((channel) => ({ id: channel.id, name: channel.name }))
+  }));
+  response.json({ guilds });
+});
+app.post('/api/control', requireAdmin, async (request, response) => {
+  const { action, guildId: targetGuildId, channelId: targetChannelId, slot } = request.body || {};
+  if (!['join', 'stop', 'disconnect', 'play'].includes(action) || !/^\d{17,20}$/.test(targetGuildId || '')) {
+    return response.status(400).json({ error: 'Choose a valid server and action.' });
+  }
+  if (['join', 'play'].includes(action) && !/^\d{17,20}$/.test(targetChannelId || '')) {
+    return response.status(400).json({ error: 'Choose a voice channel.' });
+  }
+  if (action === 'play' && !audioSlots.includes(slot)) return response.status(400).json({ error: 'Choose an audio slot.' });
+  try {
+    response.json(await runWebControl(action, targetGuildId, targetChannelId, slot));
+  } catch (error) {
+    response.status(400).json({ error: error.message });
+  }
+});
 app.get('/api/audio', requireAdmin, (request, response) => {
   const files = fs.readdirSync(audioDir).filter((file) => /\.(mp3|wav|ogg|m4a)$/i.test(file)).concat(defaultFiles.filter((file) => fs.existsSync(path.join(rootDir, file))));
   const config = readAudioConfig();

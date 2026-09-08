@@ -39,9 +39,9 @@ When `GUILD_ID` is set, slash commands are registered in that server and appear 
 
 ## Deploy on Render
 
-Create a **Background Worker** from this repository. Set **Root Directory** to blank (the repository root), **Build Command** to `npm install`, and **Start Command** to `npm start`. Do not use `node src/index.js` as the Render start command. Do not set the root directory to `src`; `src` is a folder containing the implementation, not the project root. Add `DISCORD_TOKEN` and `CLIENT_ID` as Render environment variables. Add `GUILD_ID` only when it is the real numeric ID of your Discord server; otherwise leave it empty.
+Create a **Web Service** from this repository. Set **Root Directory** to blank (the repository root), **Build Command** to `npm install`, and **Start Command** to `npm start`. Do not use `node src/index.js` as the Render start command. Do not set the root directory to `src`; `src` is a folder containing the implementation, not the project root. Add all five `DISCORD_TOKEN_1` through `DISCORD_TOKEN_5`, matching client IDs, and `WEB_ADMIN_KEY` as Render environment variables. Add `GUILD_ID` only when it is the real numeric ID of your Discord server; otherwise leave it empty.
 
-If the Render service is configured as a **Web Service**, the bot now exposes a health endpoint on Render's `PORT` at `/health`. A **Background Worker** is still the better service type for a Discord bot because it does not require an HTTP endpoint.
+The dashboard is available at the deployed service URL. Open it with `?key=YOUR_WEB_ADMIN_KEY`, choose a server and voice channel, then use **Join**, **Stop**, **Disconnect**, or **Play selected**. The same action is broadcast to every online bot.
 
 The included `render.yaml` contains the same worker configuration for Blueprint deploys.
 

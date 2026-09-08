@@ -1,5 +1,5 @@
 services:
-  - type: worker
+  - type: web
     name: dcbot3
     runtime: node
     rootDir: .
