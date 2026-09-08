@@ -28,6 +28,12 @@
     button:hover { background: #f4c68f; }
     .danger { background: #9e5147; border-color: #9e5147; color: #fff5ed; }
     .status { min-height: 1.3em; color: #e8ae70; font: .9rem Arial, sans-serif; }
+    .logs { max-height: 220px; overflow: auto; background: #100e0c; border: 1px solid #5d4d3d; padding: 12px; font: .75rem/1.6 Consolas, monospace; }
+    .log { border-bottom: 1px solid #30271f; padding: 3px 0; }
+    .log.error { color: #ff9c8d; }
+    .audio-list { display: grid; gap: 10px; }
+    .audio-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; align-items: center; }
+    audio { width: 100%; }
     @media (max-width: 580px) { .grid, .actions { grid-template-columns: 1fr; } main { padding: 36px 0; } }
   </style>
 </head>
@@ -45,11 +51,23 @@
       <p class="muted">All five bot slots are shown below. A red status usually means a missing or invalid Render token.</p>
       <div id="bots" class="bots"></div>
     </section>
+    <section id="logsPanel" class="panel hidden">
+      <h2>Live logs</h2>
+      <div id="logs" class="logs"></div>
+    </section>
     <section id="actionsPanel" class="panel hidden">
       <label for="channelId">Discord voice channel ID</label>
       <input id="channelId" inputmode="numeric" placeholder="Paste the voice channel ID here">
       <div class="actions"><button data-action="join">Join All Bots</button><button data-action="stop">Stop All</button><button data-action="disconnect" class="danger">Disconnect All</button></div>
       <p id="status" class="status"></p>
+    </section>
+    <section id="audioPanel" class="panel hidden">
+      <h2>Browser audio player</h2>
+      <p class="muted">Upload audio for listening in this dashboard. This player is separate from Discord voice control.</p>
+      <input id="audioFile" type="file" accept="audio/*">
+      <button id="uploadAudio" type="button" style="margin-top:10px">Upload audio</button>
+      <p id="audioStatus" class="status"></p>
+      <div id="audioList" class="audio-list"></div>
     </section>
   </main>
   <script>
@@ -62,6 +80,8 @@
     const loginPanel = document.querySelector('#loginPanel');
     const controlPanel = document.querySelector('#controlPanel');
     const actionsPanel = document.querySelector('#actionsPanel');
+    const logsPanel = document.querySelector('#logsPanel');
+    const audioPanel = document.querySelector('#audioPanel');
     const botsElement = document.querySelector('#bots');
     async function loadStatus() {
       const response = await fetch('/api/bots', { headers: headers() });
@@ -71,13 +91,38 @@
       loginPanel.classList.add('hidden');
       controlPanel.classList.remove('hidden');
       actionsPanel.classList.remove('hidden');
+      logsPanel.classList.remove('hidden');
+      audioPanel.classList.remove('hidden');
       authStatus.textContent = 'Logged in.';
+      loadLogs();
+      loadAudio();
+    }
+    async function loadLogs() {
+      const response = await fetch('/api/logs', { headers: headers() });
+      const data = await response.json();
+      document.querySelector('#logs').innerHTML = data.slice().reverse().map(log => `<div class="log ${log.level}">${new Date(log.time).toLocaleTimeString()} ${log.message}</div>`).join('') || '<div class="muted">No logs yet.</div>';
+    }
+    async function loadAudio() {
+      const response = await fetch('/api/audio', { headers: headers() });
+      const data = await response.json();
+      document.querySelector('#audioList').innerHTML = data.map(file => `<div class="audio-row"><span>${file.name}</span><audio controls preload="none" src="${file.url}"></audio></div>`).join('') || '<div class="muted">No uploaded audio yet.</div>';
     }
     document.querySelector('#saveKey').addEventListener('click', () => {
       key = keyInput.value.trim();
       localStorage.setItem('dashboardKey', key);
       if (!key) { authStatus.textContent = 'Enter the WEB_ADMIN_KEY from Render.'; return; }
       loadStatus().catch(error => authStatus.textContent = error.message);
+    });
+    document.querySelector('#uploadAudio').addEventListener('click', async () => {
+      const file = document.querySelector('#audioFile').files[0];
+      const audioStatus = document.querySelector('#audioStatus');
+      if (!file) { audioStatus.textContent = 'Choose an audio file first.'; return; }
+      audioStatus.textContent = 'Uploading...';
+      const form = new FormData(); form.append('audio', file);
+      const response = await fetch('/api/audio/upload', { method: 'POST', headers: headers(), body: form });
+      const result = await response.json();
+      audioStatus.textContent = response.ok ? 'Audio uploaded.' : result.error;
+      if (response.ok) loadAudio();
     });
     const channelIdInput = document.querySelector('#channelId');
     const status = document.querySelector('#status');
@@ -89,6 +134,7 @@
       const response = await fetch('/api/control', { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ action, channelId }) });
       const result = await response.json();
       status.textContent = response.ok ? `${result.completed}/${result.total} bots completed ${action}.` : result.error;
+      loadLogs();
     }));
     if (key) loadStatus().catch(error => authStatus.textContent = error.message);
   </script>

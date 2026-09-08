@@ -1,7 +1,9 @@
 require('dotenv').config();
 
 const path = require('node:path');
+const fs = require('node:fs');
 const express = require('express');
+const multer = require('multer');
 const {
   Client,
   GatewayIntentBits,
@@ -14,15 +16,24 @@ const {
   joinVoiceChannel,
 } = require('@discordjs/voice');
 const rootDir = __dirname;
+const audioDir = path.join(rootDir, 'audio');
 const port = Number(process.env.PORT) || 10000;
 const adminKey = process.env.WEB_ADMIN_KEY;
 const guildId = /^\d{17,20}$/.test(process.env.GUILD_ID || '') ? process.env.GUILD_ID : undefined;
+const logs = [];
+fs.mkdirSync(audioDir, { recursive: true });
+
+function addLog(level, message) {
+  const entry = { time: new Date().toISOString(), level, message };
+  logs.push(entry);
+  if (logs.length > 100) logs.shift();
+  console[level === 'error' ? 'error' : 'log'](`[${level.toUpperCase()}] ${message}`);
+}
 
 function configuredBots() {
   return Array.from({ length: 5 }, (_, index) => ({
     number: index + 1,
     token: process.env[`DISCORD_TOKEN_${index + 1}`],
-    clientId: process.env[`CLIENT_ID_${index + 1}`],
     status: process.env[`DISCORD_TOKEN_${index + 1}`] && !process.env[`DISCORD_TOKEN_${index + 1}`].startsWith('replace-with-') ? 'starting' : 'missing-token',
   }));
 }
@@ -106,11 +117,13 @@ async function runWebControl(action, guildIdToControl, channelIdToControl) {
     return true;
   }));
   const failed = results.filter((result) => result.status === 'rejected');
-  return {
+  const summary = {
     completed: results.length - failed.length,
     total: results.length,
     errors: failed.map((result) => result.reason?.message || 'Command failed'),
   };
+  addLog(failed.length ? 'error' : 'info', `Web control ${action}: ${summary.completed}/${summary.total} bots completed.`);
+  return summary;
 }
 
 function disconnect(botNumber, guildIdToDisconnect) {
@@ -156,10 +169,10 @@ async function runForAllBots(command, message) {
 function attachBot(bot) {
   if (!bot.token || bot.token.startsWith('replace-with-')) {
     bots.push({ ...bot, client: null, status: 'missing-token', statusMessage: 'Add this bot token in Render.' });
-    console.error(`[Bot ${bot.number}] NOT STARTED: DISCORD_TOKEN_${bot.number} is missing in Render.`);
+    addLog('error', `Bot ${bot.number} is not started: DISCORD_TOKEN_${bot.number} is missing in Render.`);
     return;
   }
-  console.log(`[Bot ${bot.number}] Token configured. Attempting Discord login...`);
+  addLog('info', `Bot ${bot.number} token configured. Attempting Discord login.`);
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
   const botState = { ...bot, client, status: bot.status };
   bots.push(botState);
@@ -168,7 +181,7 @@ function attachBot(bot) {
     botState.status = 'online';
     botState.statusMessage = 'Connected to Discord';
     botState.tag = readyClient.user.tag;
-    console.log(`[Bot ${bot.number}] LOGIN SUCCESS: ${readyClient.user.tag} | Servers: ${readyClient.guilds.cache.size}`);
+    addLog('info', `Bot ${bot.number} login successful as ${readyClient.user.tag}. Servers: ${readyClient.guilds.cache.size}.`);
   });
 
   client.on('messageCreate', async (message) => {
@@ -189,7 +202,7 @@ function attachBot(bot) {
   client.login(bot.token).catch((error) => {
     botState.status = 'error';
     botState.statusMessage = error.code === 4004 ? 'Invalid token' : error.message;
-    console.error(`[Bot ${bot.number}] LOGIN FAILED: ${botState.statusMessage}`);
+    addLog('error', `Bot ${bot.number} login failed: ${botState.statusMessage}.`);
   });
 }
 
@@ -204,6 +217,12 @@ app.use(express.json());
 app.use(express.static(path.join(rootDir, 'public')));
 app.get('/health', (request, response) => response.json({ status: 'ok', bots: bots.map((bot) => ({ number: bot.number, status: bot.status })) }));
 app.get('/api/bots', requireAdmin, (request, response) => response.json(bots.map((bot) => ({ number: bot.number, status: bot.status, message: bot.statusMessage || null, tag: bot.tag || null }))));
+app.get('/api/logs', requireAdmin, (request, response) => response.json(logs));
+app.get('/api/audio', requireAdmin, (request, response) => {
+  const files = fs.readdirSync(audioDir).filter((file) => /\.(mp3|wav|ogg|m4a|webm)$/i.test(file));
+  response.json(files.map((file) => ({ name: file, url: `/audio/${encodeURIComponent(file)}` })));
+});
+app.use('/audio', express.static(audioDir));
 app.get('/api/discord-context', requireAdmin, (request, response) => {
   const controller = bots.find((bot) => bot.status === 'online');
   if (!controller) return response.json({ guilds: [] });
@@ -231,10 +250,24 @@ app.post('/api/control', requireAdmin, async (request, response) => {
   }
 });
 
+const upload = multer({
+  dest: audioDir,
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (request, file, callback) => callback(null, /^audio\//.test(file.mimetype) || /\.(mp3|wav|ogg|m4a|webm)$/i.test(file.originalname)),
+});
+app.post('/api/audio/upload', requireAdmin, upload.single('audio'), (request, response) => {
+  if (!request.file) return response.status(400).json({ error: 'Choose an audio file.' });
+  const extension = path.extname(request.file.originalname).toLowerCase() || '.mp3';
+  const safeName = `${Date.now()}-${path.basename(request.file.originalname, extension).replace(/[^a-z0-9_-]/gi, '-')}${extension}`;
+  fs.renameSync(request.file.path, path.join(audioDir, safeName));
+  addLog('info', `Audio uploaded: ${safeName}.`);
+  response.json({ name: safeName, url: `/audio/${encodeURIComponent(safeName)}` });
+});
+
 app.listen(port, '0.0.0.0', () => console.log(`Web dashboard listening on port ${port}`));
 
 const configured = configuredBots();
 const tokenCount = configured.filter((bot) => bot.token && !bot.token.startsWith('replace-with-')).length;
-console.log(`Configured ${tokenCount}/5 Discord bot token(s).`);
-if (!tokenCount) console.error('No Discord bot tokens configured. Add DISCORD_TOKEN_1 through DISCORD_TOKEN_5 in Render.');
+addLog('info', `Configured ${tokenCount}/5 Discord bot token(s).`);
+if (!tokenCount) addLog('error', 'No Discord bot tokens configured. Add DISCORD_TOKEN_1 through DISCORD_TOKEN_5 in Render.');
 configured.forEach(attachBot);
