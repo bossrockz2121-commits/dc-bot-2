@@ -199,8 +199,8 @@ async function runWebControl(action, guildIdToControl, channelIdToControl, filen
   }
   const results = await Promise.all(activeBots.map(async (bot) => {
     try {
-      if (action === 'join' || action === 'play') {
-        // Give Discord a moment between gateway voice-state handshakes.
+      if (action === 'join') {
+        // Stagger only gateway handshakes; playback must start concurrently.
         await new Promise((resolve) => setTimeout(resolve, (bot.number - 1) * 1_000));
       }
       const requestedChannel = channelIdToControl
